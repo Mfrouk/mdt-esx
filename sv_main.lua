@@ -87,7 +87,7 @@ AddEventHandler('erp_mdt:open', function(source)
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
         if xPlayer.job and
-            (xPlayer.job.name == 'police' or (xPlayer.job.name == 'ambulance' or xPlayer.job.name == 'doj')) then
+        (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
             local cs = GetCallsign(xPlayer.getIdentifier())
             if cs then
                 TriggerClientEvent('erp_mdt:updateCallsign', xPlayer.source, cs[1].callsign)
@@ -216,7 +216,8 @@ end
 AddEventHandler('erp_mdt:open', function(source)
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+        if xPlayer.job and  (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
             -- get warrants
             exports.oxmysql:execute("SELECT * FROM pd_convictions WHERE warrant = '1'", {}, function(warrants)
                 for i = 1, #warrants do
@@ -298,7 +299,8 @@ AddEventHandler('erp_mdt:searchProfile', function(sentData)
         end
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 exports.oxmysql:execute(
                     "SELECT id, identifier, firstname, lastname, sex, profilepic FROM `users` WHERE LOWER(`firstname`) LIKE @query OR LOWER(`lastname`) LIKE @query OR LOWER(`identifier`) LIKE @query OR CONCAT(LOWER(`firstname`), ' ', LOWER(`lastname`)) LIKE @query LIMIT 20",
                     {
@@ -572,7 +574,8 @@ AddEventHandler('erp_mdt:getProfileData', function(sentId)
     local sentId = tonumber(sentId)
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
             exports.oxmysql:execute(
                 'SELECT id, identifier, firstname, lastname, job, profilepic, sex, dateofbirth FROM users WHERE id = @id LIMIT 1',
                 {
@@ -781,7 +784,8 @@ RegisterNetEvent("erp_mdt:saveProfile")
 AddEventHandler('erp_mdt:saveProfile', function(pfp, information, cid, fName, sName)
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
             local function UpdateInfo(id, pfp, desc)
                 exports.oxmysql:executeSync(
                     "UPDATE policemdtdata SET `information` = @information WHERE `cid` = @id LIMIT 1", {
@@ -852,7 +856,8 @@ RegisterNetEvent("erp_mdt:newTag")
 AddEventHandler('erp_mdt:newTag', function(cid, tag)
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
             local function UpdateTags(id, tags)
                 exports.oxmysql:executeSync("UPDATE policemdtdata SET `tags` = @tags WHERE `id`= @id LIMIT 1", {
                     ["@id"] = id,
@@ -910,7 +915,8 @@ RegisterNetEvent("erp_mdt:removeProfileTag")
 AddEventHandler('erp_mdt:removeProfileTag', function(cid, tagtext)
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
 
             local function UpdateTags(id, tag)
                 exports.oxmysql:executeSync("UPDATE policemdtdata SET `tags` = @tags WHERE `id`= @id LIMIT 1", {
@@ -991,7 +997,8 @@ RegisterNetEvent("erp_mdt:addGalleryImg")
 AddEventHandler('erp_mdt:addGalleryImg', function(cid, img)
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
 
             local function UpdateGallery(id, gallery)
                 exports.oxmysql:executeSync("UPDATE policemdtdata SET `gallery` = :gallery WHERE `id`= @id LIMIT 1", {
@@ -1051,7 +1058,8 @@ RegisterNetEvent("erp_mdt:removeGalleryImg")
 AddEventHandler('erp_mdt:removeGalleryImg', function(cid, img)
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
 
             local function UpdateGallery(id, gallery)
                 exports.oxmysql:executeSync("UPDATE policemdtdata SET `gallery` = @gallery WHERE `id`= @id LIMIT 1", {
@@ -1123,7 +1131,8 @@ RegisterNetEvent('erp_mdt:getAllIncidents')
 AddEventHandler('erp_mdt:getAllIncidents', function()
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
             exports.oxmysql:execute("SELECT * FROM `pd_incidents` ORDER BY `id` DESC LIMIT 30", {}, function(matches)
                 TriggerClientEvent('erp_mdt:getAllIncidents', xPlayer.source, matches)
             end)
@@ -1136,7 +1145,8 @@ AddEventHandler('erp_mdt:searchIncidents', function(query)
     if query then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 exports.oxmysql:execute(
                     "SELECT * FROM `pd_incidents` WHERE `id` LIKE @query OR LOWER(`title`) LIKE @query OR LOWER(`author`) LIKE @query OR LOWER(`details`) LIKE @query OR LOWER(`tags`) LIKE @query OR LOWER(`officersinvolved`) LIKE @query OR LOWER(`civsinvolved`) LIKE @query OR LOWER(`author`) LIKE @query ORDER BY `id` DESC LIMIT 50",
                     {
@@ -1154,7 +1164,8 @@ AddEventHandler('erp_mdt:getIncidentData', function(sentId)
     if sentId then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 exports.oxmysql:execute("SELECT * FROM `pd_incidents` WHERE `id` = @id", {
                     ["@id"] = sentId
                 }, function(matches)
@@ -1210,7 +1221,8 @@ RegisterNetEvent('erp_mdt:getAllBolos')
 AddEventHandler('erp_mdt:getAllBolos', function()
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
             exports.oxmysql:execute("SELECT * FROM `pd_bolos`", {}, function(matches)
                 TriggerClientEvent('erp_mdt:getAllBolos', xPlayer.source, matches)
             end)
@@ -1227,7 +1239,8 @@ AddEventHandler('erp_mdt:searchBolos', function(sentSearch)
     if sentSearch then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 exports.oxmysql:execute(
                     "SELECT * FROM `pd_bolos` WHERE `id` LIKE @query OR LOWER(`title`) LIKE @query OR `plate` LIKE @query OR LOWER(`owner`) LIKE @query OR LOWER(`individual`) LIKE @query OR LOWER(`detail`) LIKE @query OR LOWER(`officersinvolved`) LIKE @query OR LOWER(`tags`) LIKE @query OR LOWER(`author`) LIKE @query",
                     {
@@ -1253,7 +1266,8 @@ AddEventHandler('erp_mdt:getBoloData', function(sentId)
     if sentId then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 exports.oxmysql:execute("SELECT * FROM `pd_bolos` WHERE `id` =  @id LIMIT 1", {
                     ["@id"] = sentId
                 }, function(matches)
@@ -1285,7 +1299,8 @@ AddEventHandler('erp_mdt:newBolo',
         if id then
             local xPlayer = ESX.GetPlayerFromId(source)
             if xPlayer then
-                if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+                if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
 
                     local function InsertBolo()
                         exports.oxmysql:insert(
@@ -1401,7 +1416,8 @@ AddEventHandler('erp_mdt:deleteBolo', function(id)
     if id then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 exports.oxmysql:executeSync("DELETE FROM `pd_bolos` WHERE id= @id", {
                     id = id
                 })
@@ -1433,7 +1449,8 @@ AddEventHandler('erp_mdt:incidentSearchPerson', function(name)
     if name then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
 
                 local function PpPpPpic(sex, profilepic)
                     if profilepic then
@@ -1749,7 +1766,8 @@ AddEventHandler('erp_mdt:searchVehicles', function(search, hash)
     if search then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 exports.oxmysql:execute(
                     "SELECT owner, plate, vehicle, code, stolen, image FROM `owned_vehicles` WHERE LOWER(`plate`) LIKE @query OR LOWER(`vehicle`) LIKE @hash LIMIT 25",
                     {
@@ -1802,7 +1820,8 @@ AddEventHandler('erp_mdt:getVehicleData', function(plate)
     if plate then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 exports.oxmysql:execute(
                     "SELECT owner, plate, vehicle, code, stolen, image FROM `owned_vehicles` WHERE plate = @plate LIMIT 1",
                     {
@@ -1865,7 +1884,8 @@ AddEventHandler('erp_mdt:saveVehicleInfo', function(dbid, plate, imageurl, notes
     if plate then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 if dbid == nil then
                     dbid = 0
                 end
@@ -1904,7 +1924,8 @@ AddEventHandler('erp_mdt:knownInformation', function(dbid, type, status, plate)
     if plate then
         local xPlayer = ESX.GetPlayerFromId(source)
         if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or xPlayer.job.name == 'doj') then
+            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+
                 if dbid == nil then
                     dbid = 0
                 end
