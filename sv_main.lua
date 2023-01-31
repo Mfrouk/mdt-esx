@@ -1,4130 +1,1750 @@
+---@diagnostic disable: need-check-nil, missing-parameter
 ESX = nil
+local policeJobs = {
+    ['ambulance'] = true,
+    ['police'] = true,
+    ['sheriff'] = true
+}
+local usersRadios = {}
 
-TriggerEvent('esx:getSharedObject', function(obj) ESX = obj end)
+TriggerEvent('esx:getSharedObject', function(obj)
+    ESX = obj
+end)
 
--- (Start) Opening the MDT and sending data
-AddEventHandler('erp_mdt:AddLog', function(text)
-    exports.oxmysql:executeSync('INSERT INTO `pd_logs` (`text`, `time`) VALUES (@text, @time)', {
+exports('open', function(event, item, inventory, slot, data)
+    if event == 'usingItem' then
+        local src = inventory.id
+        local xPlayer = ESX.GetPlayerFromId(src)
+        local rank = xPlayer.getJob().grade_label
+        if policeJobs[xPlayer.job.name] then
+            TriggerClientEvent('rx_mdt:open', src, rank, xPlayer.variables.firstName, xPlayer.variables.lastName)
+        end
+    end
+end)
+
+RegisterCommand("+showMDT", function(source)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    local rank = xPlayer.getJob().grade_label
+    if policeJobs[xPlayer.job.name] then
+        TriggerClientEvent('rx_mdt:open', src, rank, xPlayer.variables.firstName, xPlayer.variables.lastName)
+    end
+end)
+
+local CallSigns = {}
+function GetCallsign(identifier)
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT `callsign` FROM `users` WHERE identifier = @identifier', {
+            ["@identifier"] = identifier
+        })
+    if result[1] ~= nil and result[1].callsign ~= nil then
+        return result[1].callsign
+    elseif CallSigns[identifier] then
+        return CallSigns[identifier]
+    else
+        return 0
+    end
+end
+
+
+RegisterServerEvent('rx_mdt:setRadio')
+AddEventHandler("rx_mdt:setRadio", function(radio)
+    local src = source
+    local user = ESX.GetPlayerFromId(src)
+    local char = user.getJob().grade_salary
+    if not user then
+        return
+    end
+    usersRadios[tonumber(char)] = radio
+end)
+
+RegisterServerEvent('police:setCallSign')
+AddEventHandler("police:setCallSign", function(callsign)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    local char = xPlayer.getJob().grade_salary
+    if not xPlayer then
+        return
+    end
+    CallSigns[tonumber(char)] = callsign
+end)
+
+RegisterServerEvent("rx_mdt:opendashboard")
+AddEventHandler("rx_mdt:opendashboard", function()
+    local src = source
+    UpdateWarrants(src)
+    Updatebulletin(src)
+    UpdateDispatch(src)
+    UpdateUnits(src)
+ --   getVehicles(src)
+ --   getProfiles(src)
+ --   UpdateReports(src)
+end)
+
+function UpdateWarrants(src)
+    local firsttime = true
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM user_licenses WHERE type = "patrani"', {})
+    local warrnts = {}
+
+    TriggerClientEvent('rx_mdt:ResetWarants', src)
+    if result then
+        for k, v in pairs(result) do
+            local result2 = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT firstname, lastname, dateofbirth FROM users WHERE identifier = "'..v.owner..'"', {})
+            local player = ESX.GetPlayerFromIdentifier(string.sub(v.owner, 7))
+            if player then
+                TriggerClientEvent("rx_mdt:dashboardWarrants", src, {
+                    firsttime = firsttime,
+                    name = player.getName(),
+                    cid = v.owner,
+                    dob = result2[1].dateofbirth
+                })
+                firsttime = false 
+            end
+        end
+    else
+        print('Nikdo nebol najdeny') 
+    end
+end
+
+function UpdateReports(src)
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_reports', {})
+    TriggerClientEvent("rx_mdt:dashboardReports", src, result)
+end
+
+function Updatebulletin(src)
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_bulletin', {})
+    TriggerClientEvent("rx_mdt:dashboardbulletin", src, result)
+end
+
+local playerOffDuty = {}
+RegisterNetEvent('rx_mdt:toggleDuty', function(status)
+    if status == 1 then
+        status = 0
+    else
+        status = 1
+    end
+    playerOffDuty[source] = status
+end)
+
+function UpdateUnits(src)
+    local lspd, sheriff, sasp, doc, sapr, pa, ems = {}, {}, {}, {}, {}, {}, {}
+
+    for _, v in pairs(ESX.GetPlayers()) do
+        local xPlayer = ESX.GetPlayerFromId(tonumber(v))
+        if xPlayer then
+            local xPlayerjob = xPlayer.getJob()
+            local character = xPlayer.getIdentifier()
+            local rank = xPlayerjob.grade and xPlayerjob.grade or 0
+            local name = xPlayer.getName()
+            local callSign = GetCallsign(character)
+            if xPlayerjob.name == "police" then
+                lspds = #lspd + 1
+                lspd[lspds] = {}
+                lspd[lspds].duty = playerOffDuty[tonumber(v)] == 1 and 0 or 1
+                lspd[lspds].cid = character
+                lspd[lspds].radio = usersRadios[character] or nil
+                lspd[lspds].callsign = callSign
+                lspd[lspds].name = name
+            elseif xPlayerjob.name == "sheriff" then
+                sheriffn = #sheriff + 1
+                sheriff[sheriffn] = {}
+                sheriff[sheriffn].duty = playerOffDuty[tonumber(v)] == 1 and 0 or 1
+                sheriff[sheriffn].cid = character
+                sheriff[sheriffn].radio = usersRadios[character] or nil
+                sheriff[sheriffn].callsign = callSign
+                sheriff[sheriffn].name = name
+            elseif xPlayerjob.name == "sasp" then
+                saspn = #lspd + 1
+                sasp[saspn] = {}
+                sasp[saspn].duty = playerOffDuty[tonumber(v)] == 1 and 0 or 1
+                sasp[saspn].cid = character
+                sasp[saspn].radio = usersRadios[character] or nil
+                sasp[saspn].callsign = callSign
+                sasp[saspn].name = name
+            elseif xPlayer.job.name == "ambulance" then
+                emss = #ems + 1
+                ems[emss] = {}
+                ems[emss].duty = playerOffDuty[tonumber(v)] == 1 and 0 or 1
+                ems[emss].cid = character
+                ems[emss].radio = usersRadios[character] or nil
+                ems[emss].callsign = callSign
+                ems[emss].name = name
+            elseif xPlayer.job.name == 'lsfd' then
+                saprs = #sapr + 1
+                sapr[saprs] = {}
+                sapr[saprs].duty = playerOffDuty[tonumber(v)] == 1 and 0 or 1
+                sapr[saprs].cid = character
+                sapr[saprs].radio = usersRadios[character] or nil
+                sapr[saprs].callsign = callSign
+                sapr[saprs].name = name
+            end
+        end
+    end
+
+    TriggerClientEvent("rx_mdt:getActiveUnits", src, lspd, sheriff, sasp, doc, sapr, pa, ems)
+end
+
+function getVehicles(src)
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT * FROM owned_vehicles aa LEFT JOIN vehicle_mdt a ON a.license_plate = aa.plate LEFT JOIN mdw_bolos at ON at.license_plate = aa.plate ORDER BY time ASC',
+        {})
+    for k, v in pairs(result) do
+        if v.image and v.image ~= nil and v.image ~= "" then
+            result[k].image = v.image
+        else
+            result[k].image =
+                "https://cdn.discordapp.com/attachments/832371566859124821/881624386317201498/Screenshot_1607.png"
+        end
+
+        local owner = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT firstname, lastname from users left join owned_vehicles ON users.identifier = owned_vehicles.owner where owned_vehicles.plate =  @plate',
+            {
+                ['@plate'] = v.plate
+            })
+        result[k].owner = 'Firma'
+
+        if owner[1] and owner[1].firstname then
+            result[k].owner = owner[1].firstname .. ' ' .. owner[1].lastname
+        end
+
+        if v.stolen and v.stolen ~= nil then
+            result[k].stolen = v.stolen
+        else
+            result[k].stolen = false
+        end
+        if v.code and v.code ~= nil then
+            result[k].code = v.code
+        else
+            result[k].code = false
+        end
+        if v.author and v.author ~= nil and v.title ~= nil then
+            result[k].bolo = true
+        else
+            result[k].bolo = false
+        end
+    end
+
+    TriggerClientEvent("rx_mdt:searchVehicles", src, result, true)
+end
+
+RegisterServerEvent("rx_mdt:getProfileData")
+AddEventHandler("rx_mdt:getProfileData", function(identifier)
+    local src = source
+    local data = getProfile(identifier)
+    TriggerClientEvent("rx_mdt:getProfileData", src, data, false)
+end)
+
+RegisterServerEvent("rx_mdt:getVehicleData")
+AddEventHandler("rx_mdt:getVehicleData", function(plate)
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT * FROM owned_vehicles aa LEFT JOIN vehicle_mdt a ON a.license_plate = aa.plate LEFT JOIN mdw_bolos at ON at.license_plate = aa.plate WHERE aa.plate = @plate LIMIT 1',
+        {
+            ['@plate'] = plate
+        })
+    for k, v in pairs(result) do
+        if v.image and v.image ~= nil and v.image ~= "" then
+            result[k].image = v.image
+        else
+            result[k].image =
+                "https://cdn.discordapp.com/attachments/832371566859124821/881624386317201498/Screenshot_1607.png"
+        end
+        local owner = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT firstname, lastname from users left join owned_vehicles ON users.identifier = owned_vehicles.owner where owned_vehicles.plate =  @plate',
+            {
+                ['@plate'] = v.plate
+            })
+        result[k].owner = 'Firma'
+
+        if owner[1] and owner[1].firstname then
+            result[k].owner = owner[1].firstname .. ' ' .. owner[1].lastname
+        end
+
+        if v.stolen and v.stolen ~= nil then
+            result[k].stolen = v.stolen
+        else
+            result[k].stolen = false
+        end
+        if v.code and v.code ~= nil then
+            result[k].code = v.code
+        else
+            result[k].code = false
+        end
+        if v.notes and v.notes ~= nil then
+            result[k].information = v.notes
+        else
+            result[k].information = ""
+        end
+
+        if v.author and v.author ~= nil and v.title ~= nil then
+            result[k].bolo = true
+        else
+            result[k].bolo = false
+        end
+    end
+    TriggerClientEvent("rx_mdt:updateVehicleDbId", src, result[1].id)
+    TriggerClientEvent("rx_mdt:getVehicleData", src, result)
+end)
+
+RegisterServerEvent("rx_mdt:knownInformation")
+AddEventHandler("rx_mdt:knownInformation", function(dbid, type, status, plate)
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:knownInformation)')
+        return
+    end
+    if not dbid then
+        dbid = 'NDBID'
+    end
+    local saveData = {
+        type = type,
+        status = status
+    }
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT * FROM `vehicle_mdt` WHERE `license_plate` = @plate', {
+            ['@plate'] = plate
+        })
+    if result[1] then
+        if type == "stolen" then
+            MysqlConverter(Config.Mysql, 'execute',
+                'UPDATE `vehicle_mdt` SET `stolen` = @stolen WHERE `license_plate` = @plate', {
+                    ['@stolen'] = status,
+                    ['@dbid'] = dbid,
+                    ['@plate'] = plate
+                })
+        elseif type == "code5" then
+            MysqlConverter(Config.Mysql, 'execute',
+                'UPDATE `vehicle_mdt` SET `code` = @code WHERE `license_plate` = @plate', {
+                    ['@code'] = status,
+                    ['@dbid'] = dbid,
+                    ['@plate'] = plate
+                })
+        end
+    else
+        if type == "stolen" then
+            MysqlConverter(Config.Mysql, 'execute',
+                'INSERT INTO `vehicle_mdt` (`license_plate`, `stolen`, `dbid`) VALUES (@plate, @stolen, @dbid)', {
+                    ['@dbid'] = dbid,
+                    ['@plate'] = plate,
+                    ['@stolen'] = status
+                })
+        elseif type == "code5" then
+            MysqlConverter(Config.Mysql, 'execute',
+                'INSERT INTO `vehicle_mdt` (`license_plate`, `code`, `dbid`) VALUES (@plate, @code, @dbid)', {
+                    ['@dbid'] = dbid,
+                    ['@plate'] = plate,
+                    ['@code'] = status
+                })
+        end
+    end
+end)
+
+RegisterServerEvent("rx_mdt:searchVehicles")
+AddEventHandler("rx_mdt:searchVehicles", function(plate)
+    local src = source
+    local lowerplate = string.lower('%' .. plate .. '%')
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT * FROM owned_vehicles aa LEFT JOIN vehicle_mdt a ON a.license_plate = aa.plate LEFT JOIN mdw_bolos at ON at.license_plate = aa.plate WHERE LOWER(plate) LIKE @plate ORDER BY plate ASC',
+        {
+            ['@plate'] = lowerplate
+        })
+    for k, v in pairs(result) do
+        if v.image and v.image ~= nil and v.image ~= "" then
+            result[k].image = v.image
+        else
+            result[k].image =
+                "https://cdn.discordapp.com/attachments/832371566859124821/881624386317201498/Screenshot_1607.png"
+        end
+
+        local owner = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT firstname, lastname from users left join owned_vehicles ON users.identifier = owned_vehicles.owner where owned_vehicles.plate =  @plate',
+            {
+                ['@plate'] = v.plate
+            })
+        result[k].owner = 'Firma'
+
+        if owner[1] and owner[1].firstname then
+            result[k].owner = owner[1].firstname .. ' ' .. owner[1].lastname
+        end
+
+        if v.stolen and v.stolen ~= nil then
+            result[k].stolen = v.stolen
+        else
+            result[k].stolen = false
+        end
+        if v.code and v.code ~= nil then
+            result[k].code = v.code
+        else
+            result[k].code = false
+        end
+        if v.author and v.author ~= nil and v.title ~= nil then
+            result[k].bolo = true
+        else
+            result[k].bolo = false
+        end
+    end
+    TriggerClientEvent("rx_mdt:searchVehicles", src, result)
+end)
+
+RegisterServerEvent("rx_mdt:saveVehicleInfo")
+AddEventHandler("rx_mdt:saveVehicleInfo", function(dbid, plate, imageurl, notes)
+    if imageurl == "" or not imageurl then
+        imageurl = ""
+    end
+    if notes == "" or not notes then
+        notes = ""
+    end
+    if not dbid then
+        dbid = 'NDBID'
+    end
+    if plate == "" then
+        return
+    end
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:saveVehicleInfo)')
+        return
+    end
+    local usource = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT * FROM `vehicle_mdt` WHERE `license_plate` = @license_plate', {
+            ['@license_plate'] = plate
+        })
+    if result[1] then
+        MysqlConverter(Config.Mysql, 'execute',
+            'UPDATE `vehicle_mdt` SET `image` = @image, `notes` = @notes WHERE `license_plate` = @license_plate', {
+                ['@image'] = imageurl,
+                ['@dbid'] = dbid,
+                ['@license_plate'] = plate,
+                ['@notes'] = notes
+            })
+    else
+        MysqlConverter(Config.Mysql, 'execute',
+            'INSERT INTO `vehicle_mdt` (`license_plate`, `stolen`, `notes`, `image`, `dbid`) VALUES (@license_plate, @stolen, @notes, @image, @dbid)',
+            {
+                ['@dbid'] = dbid,
+                ['@license_plate'] = plate,
+                ['@stolen'] = 0,
+                ['@image'] = imageurl,
+                ['@notes'] = notes
+            })
+    end
+end)
+
+RegisterServerEvent("rx_mdt:saveProfile")
+AddEventHandler("rx_mdt:saveProfile", function(profilepic, information, identifier, fName, sName)
+    if imageurl == "" or not imageurl then
+        imageurl = ""
+    end
+    if notes == "" or not notes then
+        notes = ""
+    end
+    if dbid == 0 then
+        return
+    end
+    if plate == "" then
+        return
+    end
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(src, 'Cheating, trigger event! (rx_mdt:saveProfile)')
+        return
+    end
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM `mdw_profiles` WHERE `cid` = @cid', {
+        ['@cid'] = identifier
+    })
+    if result[1] then
+        MysqlConverter(Config.Mysql, 'execute',
+            'UPDATE `mdw_profiles` SET `image` = @image, `description` = @description, `name` = @name WHERE `cid` = @cid',
+            {
+                ['@image'] = profilepic,
+                ['@description'] = information,
+                ['@name'] = fName .. " " .. sName,
+                ['@cid'] = identifier
+            }
+        )
+
+        lib.logger(xPlayer.identifier, 'mdt', ('Hráč: **%s/%s %s** \nUpravil/a profil \nMeno: **%s** \nZmena: **%s**'):format(GetPlayerName(src), xPlayer.getName(), GetCallsign(xPlayer.identifier), fName .. " " .. sName, information))
+    else
+        MysqlConverter(Config.Mysql, 'execute',
+            'INSERT INTO `mdw_profiles` (`cid`, `image`, `description`, `name`) VALUES (@cid, @image, @description, @name)',
+            {
+                ['@cid'] = identifier,
+                ['@image'] = profilepic,
+                ['@description'] = information,
+                ['@name'] = fName .. " " .. sName
+            })
+    end
+end)
+
+RegisterServerEvent("rx_mdt:addGalleryImg")
+AddEventHandler("rx_mdt:addGalleryImg", function(identifier, url)
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM `mdw_profiles` WHERE cid = @identifier', {
+        ["@identifier"] = identifier
+    })
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:addGalleryImg)')
+        return
+    end
+    if result and result[1] then
+        result[1].gallery = json.decode(result[1].gallery)
+        table.insert(result[1].gallery, url)
+        MysqlConverter(Config.Mysql, 'execute',
+            'UPDATE `mdw_profiles` SET `gallery` = @gallery WHERE `cid` = @identifier', {
+                ['@identifier'] = identifier,
+                ['@gallery'] = json.encode(result[1].gallery)
+            })
+    end
+end)
+
+RegisterServerEvent("rx_mdt:removeGalleryImg")
+AddEventHandler("rx_mdt:removeGalleryImg", function(identifier, url)
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:removeGalleryImg)')
+        return
+    end
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM `mdw_profiles` WHERE cid = @identifier', {
+        ["@identifier"] = identifier
+    })
+    if result and result[1] then
+        result[1].gallery = json.decode(result[1].gallery)
+        for k, v in ipairs(result[1].gallery) do
+            if v == url then
+                table.remove(result[1].gallery, k)
+            end
+        end
+        MysqlConverter(Config.Mysql, 'execute',
+            'UPDATE `mdw_profiles` SET `gallery` = @gallery WHERE `cid` = @identifier', {
+                ['@identifier'] = identifier,
+                ['@gallery'] = json.encode(result[1].gallery)
+            })
+    end
+end)
+
+RegisterServerEvent("rx_mdt:searchProfile")
+AddEventHandler("rx_mdt:searchProfile", function(query)
+    local src = source
+    local queryData = string.lower('%' .. query .. '%')
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        "SELECT * FROM `users` WHERE LOWER(`firstname`) LIKE @var1 OR LOWER(`identifier`) LIKE @var2 OR LOWER(`lastname`) LIKE @var3 OR CONCAT(LOWER(`firstname`), ' ', LOWER(`lastname`), ' ', LOWER(`identifier`)) LIKE @var4 ORDER BY firstname DESC",
+        {
+            ['@var1'] = queryData,
+            ['@var2'] = queryData,
+            ['@var3'] = queryData,
+            ['@var4'] = queryData
+
+        })
+    local licenses = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM user_licenses', {})
+    local mdw_profiles = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_profiles', {})
+
+    for k, v in pairs(result) do
+        result[k].firstname = v.firstname
+        result[k].lastname = v.lastname
+
+        local patrani = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = v.identifier,
+            ['@lictype'] = 'patrani'
+        })
+        if patrani and patrani[1] then
+            if patrani[1].status == 1 then
+                result[k].patrani = true
+            end
+        end
+
+        local zadrzeny = MysqlConverter(Config.Mysql, 'fetchAll',
+            'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+                ['@owner'] = v.identifier,
+                ['@lictype'] = 'zadrzany'
+            })
+        if zadrzeny and zadrzeny[1] then
+            if zadrzeny[1].status == 1 then
+                result[k].zadrzeny = true
+            end
+        end
+
+        result[k].policemdtinfo = ""
+        result[k].pp = "https://cdn.discordapp.com/attachments/904822052358336573/1016298208516915260/male.png"
+        for i = 1, #mdw_profiles do
+            if mdw_profiles[i].cid == v.idenitifer then
+                if mdw_profiles[i].image and mdw_profiles[i].image ~= nil then
+                    result[k].pp = mdw_profiles[i].image
+                end
+                if mdw_profiles[i].description and mdw_profiles[i].description ~= nil then
+                    result[k].policemdtinfo = mdw_profiles[i].description
+                end
+                result[k].policemdtinfo = mdw_profiles[i].description
+            end
+        end
+        result[k].warrant = false
+        result[k].convictions = 0
+        result[k].cid = v.idenitifer
+    end
+
+    TriggerClientEvent("rx_mdt:searchProfile", src, result, true)
+end)
+
+function getProfile(identifier)
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    })
+    local resultI = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_incidents WHERE associated LIKE "%'..identifier..'%"', {})
+
+    local vehresult = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM owned_vehicles WHERE owner = @owner', {
+        ['@owner'] = identifier
+    })
+
+    local totalCharges = {}
+    for k, v in pairs(resultI) do
+        for k2, v2 in ipairs(json.decode(v.associated)) do
+            if v2.cid == result[1].identifier then
+                table.insert(totalCharges, {label = v.title .. '- '..v.id, id = v.id})
+            end
+        end
+    end
+    result[1].convictions = totalCharges
+    result[1].vehicles = vehresult
+    result[1].firstname = result[1].firstname
+    result[1].lastname = result[1].lastname
+    result[1].phone = exports["lb-phone"]:GetEquippedPhoneNumber(identifier)
+
+    local invoices = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT status, sent_date, invoice_value, item FROM okokbilling WHERE receiver_identifier = @owner AND (society = "society_police" OR society = "society_sheriff" OR society = "society_sasp")', {
+        ['@owner'] = identifier
+    })
+    result[1].bills = invoices
+    
+
+    local weapon2 = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = identifier,
+            ['@lictype'] = 'weapon'
+        })
+    if weapon2 and weapon2[1] then
+        if weapon2[1].status == 1 then
+            result[1].Weapon = true
+        end
+    end
+
+    local drivers2 = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = identifier,
+            ['@lictype'] = 'dmv'
+        })
+    if drivers2 and drivers2[1] then
+        if drivers2[1].status == 1 then
+            result[1].Drivers = true
+        end
+    end
+
+    local patrani = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = identifier,
+            ['@lictype'] = 'patrani'
+        })
+    if patrani and patrani[1] then
+        if patrani[1].status == 1 then
+            result[1].patrani = true
+        end
+    end
+
+    local zadrzeny = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = identifier,
+            ['@lictype'] = 'zadrzany'
+        })
+    if zadrzeny and zadrzeny[1] then
+        if zadrzeny[1].status == 1 then
+            result[1].zadrzeny = true
+        end
+    end
+
+    local hunting2 = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = identifier,
+            ['@lictype'] = 'drive'
+        })
+    if hunting2 and hunting2[1] then
+        if hunting2[1].status == 1 then
+            result[1].Hunting = true
+        end
+    end
+
+    local huntingreal = MysqlConverter(Config.Mysql, 'fetchAll',
+    'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+        ['@owner'] = identifier,
+        ['@lictype'] = 'hunting'
+    })
+    if huntingreal and huntingreal[1] then
+        if huntingreal[1].status == 1 then
+            result[1].huntingreal = true
+        end
+    end
+
+    local fishing2 = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = identifier,
+            ['@lictype'] = 'drive_bike'
+        })
+    if fishing2 and fishing2[1] then
+        if fishing2[1].status == 1 then
+            result[1].Fishing = true
+        end
+    end
+
+    local atpla = MysqlConverter(Config.Mysql, 'fetchAll',
+    'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+        ['@owner'] = identifier,
+        ['@lictype'] = 'atpla'
+    })
+    if atpla and atpla[1] then
+        if atpla[1].status == 1 then
+            result[1].atpla = true
+        end
+    end
+
+    local housesTable = {}
+    local houses = MysqlConverter(Config.Mysql, 'fetchAll',
+    'SELECT propertyid FROM loaf_properties WHERE owner = @identifier', {
+        ['@identifier'] = identifier,
+    })
+    if houses and houses[1] then
+        for k, v in pairs(houses) do
+            local houseData = exports['loaf_housing']:GetHouse(v.propertyid)
+            table.insert(housesTable, {label = houseData.label .. ' - ' .. k, entrance = houseData.entrance, propertyid = v.propertyid})
+        end
+    end
+    result[1].houses = housesTable
+
+    local ppla = MysqlConverter(Config.Mysql, 'fetchAll',
+    'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+        ['@owner'] = identifier,
+        ['@lictype'] = 'ppla'
+    })
+    if ppla and ppla[1] then
+        if ppla[1].status == 1 then
+            result[1].ppla = true
+        end
+    end
+    --[[
+    local sluzebni_prukaz = MysqlConverter(Config.Mysql, 'fetchAll',
+    'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+        ['@owner'] = identifier,
+        ['@lictype'] = 'sluzebni_prukaz'
+    })
+    if sluzebni_prukaz and sluzebni_prukaz[1] then
+        if sluzebni_prukaz[1].status == 1 then
+            result[1].sluzebni_prukaz = true
+        end
+    end]]
+    local atplh = MysqlConverter(Config.Mysql, 'fetchAll',
+    'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+        ['@owner'] = identifier,
+        ['@lictype'] = 'atplh'
+    })
+    if atplh and atplh[1] then
+        if atplh[1].status == 1 then
+            result[1].atplh = true
+        end
+    end
+    local pplh = MysqlConverter(Config.Mysql, 'fetchAll',
+    'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+        ['@owner'] = identifier,
+        ['@lictype'] = 'pplh'
+    })
+    if pplh and pplh[1] then
+        if pplh[1].status == 1 then
+            result[1].pplh = true
+        end
+    end
+    local pilot2 = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = identifier,
+            ['@lictype'] = 'drive_truck'
+        })
+    if pilot2 and pilot2[1] then
+        if pilot2[1].status == 1 then
+            result[1].Pilot = true
+        end
+    end
+
+    local weaponka = MysqlConverter(Config.Mysql, 'fetchAll',
+    'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+        ['@owner'] = identifier,
+        ['@lictype'] = 'weaponka'
+    })
+    if weaponka and weaponka[1] then
+        if weaponka[1].status == 1 then
+            result[1].weaponka = true
+        end
+    end
+
+
+    local weaponda = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = identifier,
+            ['@lictype'] = 'weaponda'
+        })
+    if weaponda and weaponda[1] then
+        if weaponda[1].status == 1 then
+            result[1].weaponda = true
+        end
+    end
+
+    result[1].warrant = false
+    result[1].identifier = result[1].identifier
+    result[1].job = result[1].job
+
+    local proresult = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT * FROM mdw_profiles WHERE cid = @identifier LIMIT 1', {
+            ['@identifier'] = identifier
+        })
+    if proresult and proresult[1] ~= nil then
+        result[1].profilepic = proresult[1].image
+        result[1].tags = json.decode(proresult[1].tags)
+        result[1].gallery = json.decode(proresult[1].gallery)
+        result[1].policemdtinfo = proresult[1].description
+    else
+        result[1].tags = {}
+        result[1].gallery = {}
+        result[1].pp =
+            "https://cdn.discordapp.com/attachments/904822052358336573/1016298208516915260/male.png"
+    end
+    return result[1]
+end
+
+function getProfiles(src)
+
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT * FROM users aa LEFT JOIN mdw_profiles at ON at.cid = aa.identifier ORDER BY firstname DESC', {})
+    for k, v in pairs(result) do
+        result[k].firstname = v.firstname
+        result[k].lastname = v.lastname
+
+        local patrani = MysqlConverter(Config.Mysql, 'fetchAll',
+        'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+            ['@owner'] = v.identifier,
+            ['@lictype'] = 'patrani'
+        })
+        if patrani and patrani[1] then
+            if patrani[1].status == 1 then
+                result[k].patrani = true
+            end
+        end
+
+        local zadrzeny = MysqlConverter(Config.Mysql, 'fetchAll',
+            'SELECT status FROM user_licenses WHERE owner = @owner AND type = @lictype', {
+                ['@owner'] = v.identifier,
+                ['@lictype'] = 'zadrzany'
+            })
+        if zadrzeny and zadrzeny[1] then
+            if zadrzeny[1].status == 1 then
+                result[k].zadrzeny = true
+            end
+        end
+
+        result[k].warrant = false
+        result[k].convictions = 0
+        result[k].cid = v.id
+
+        if v.image and v.image ~= nil and v.image ~= "" then
+            result[k].pp = v.image
+        else
+            result[k].pp =
+                "https://cdn.discordapp.com/attachments/904822052358336573/1016298208516915260/male.png"
+        end
+        local proresult = MysqlConverter(Config.Mysql, 'fetchAll',
+            'SELECT * FROM `mdw_profiles` WHERE `cid` = @identifier', {
+                ['@identifier'] = v.identifier
+            })
+        if proresult and proresult[1] ~= nil then
+
+            result[k].pp = proresult[1].image
+            result[k].policemdtinfo = proresult[1].description
+        end
+    end
+    TriggerClientEvent("rx_mdt:searchProfile", src, result, true)
+end
+
+RegisterServerEvent("rx_mdt:updateLicense")
+AddEventHandler("rx_mdt:updateLicense", function(identifier, type, status)
+    local _oldType = type
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:updateLicense)')
+        return
+    end
+
+    if type == 'ŘP Teorie' then
+        type = 'dmv'
+    elseif type == 'ŘP - A' then
+        type = 'drive_bike'
+    elseif type == 'ŘP - B' then
+        type = 'drive'
+    elseif type == 'ŘP - C' then
+        type = 'drive_truck'
+    elseif type == 'Zbrojní Průkaz' then
+        type = 'weapon'
+    elseif type == 'ZP - Velké' then
+        type = 'weaponka'
+    elseif type == 'ZP - Lovecký' then
+        type = 'weaponda'
+    elseif type == 'V Pátrani' then
+        type = 'patrani'
+    elseif type == 'Zadržený' then
+        type = 'zadrzany'
+    elseif type == 'ATPL [A] - Dopravní letadlo' then
+        type = 'atpla'
+    elseif type == 'PPL [A] - Soukromé letadlo' then
+        type = 'ppla'
+    elseif type == 'ATPL [H] - Dopravní vrtulník' then
+        type = 'atplh'
+    elseif type == 'PPL [H] - Soukromý vrtulník' then
+        type = 'pplh'
+    elseif type == 'Lovecký průkaz' then
+        type = 'hunting'
+    --[[
+    elseif type == 'Služební průkaz' then
+        type = 'sluzebni_prukaz']]
+    end
+
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    local time = os.date()
+    if status == "revoke" then
+        action = "Odebral"
+    else
+        action = "Dal"
+    end
+
+    local resukt = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT firstname, lastname FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    })
+
+    TriggerEvent("rx_mdt:newLog", name .. " " .. action .. " licensi: " .. firstToUpper(_oldType) ..
+        " - upravil data o občanovi: " .. resukt[1].firstname .. ' '..resukt[1].lastname, time)
+
+    if status == "revoke" then
+        MysqlConverter(Config.Mysql, 'execute', 'DELETE FROM user_licenses WHERE owner = @identifier AND type = @type',
+            {
+                ['@identifier'] = identifier,
+                ['@type'] = type
+            })
+    else
+        MysqlConverter(Config.Mysql, 'execute',
+            'INSERT INTO user_licenses (type, owner, status) VALUES(@type, @owner, @status)', {
+                ['@type'] = type,
+                ['@owner'] = identifier,
+                ['@status'] = 1
+            })
+    end
+end)
+
+RegisterServerEvent("rx_mdt:newBulletin")
+AddEventHandler("rx_mdt:newBulletin", function(title, info, time, id)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:newBulletin)')
+        return
+    end
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    local Bulletin = {
+        title = title,
+        id = id,
+        info = info,
+        time = time,
+        src = src,
+        author = name
+    }
+    MysqlConverter(Config.Mysql, 'execute',
+        'INSERT INTO mdw_bulletin (title, info, time, src, author, id) VALUES(@title, @info, @time, @src, @author, @id)',
+        {
+
+            ["@title"] = title,
+            ["@info"] = info,
+            ["@time"] = time,
+            ["@src"] = src,
+            ["@author"] = name,
+            ["@id"] = id
+        })
+    TriggerClientEvent("rx_mdt:newBulletin", -1, src, Bulletin, xPlayer.job.name)
+end)
+
+RegisterServerEvent("rx_mdt:deleteBulletin")
+AddEventHandler("rx_mdt:deleteBulletin", function(id)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:deleteBulletin)')
+        return
+    end
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    MysqlConverter(Config.Mysql, 'execute', 'DELETE FROM mdw_bulletin WHERE id = @id', {
+
+        ["@id"] = id
+    })
+    TriggerClientEvent("rx_mdt:deleteBulletin", -1, src, id, xPlayer.job.name)
+end)
+
+RegisterServerEvent("rx_mdt:newLog")
+AddEventHandler("rx_mdt:newLog", function(text, time)
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if xPlayer and not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:newLog)')
+        return
+    end
+
+    time = os.date ("%c")
+
+    MysqlConverter(Config.Mysql, 'execute', 'INSERT INTO mdw_logs (text, time) VALUES(@text, @time)', {
+
         ["@text"] = text,
-        ["@time"] = os.time() * 1000
+        ["@time"] = time
     })
 end)
 
-local function GetNameFromId(cid, cb)
-    cb(exports.oxmysql:executeSync('SELECT firstname, lastname FROM `users` WHERE id =  @id LIMIT 1', {
-        ["@id"] = cid
-    }))
-end
-
-local function GetIdentifierFromCid(cid, cb)
-    cb(exports.oxmysql:executeSync('SELECT identifier FROM `users` WHERE id =  @id LIMIT 1', {
-        ["@id"] = cid
-    }))
-end
-
-RegisterCommand("testmdt", function(source, args, rawCommand)
-    TriggerEvent('erp_mdt:open', source)
-	print('test')
-end, false)
-
-RegisterCommand("showmdt", function(source, args, rawCommand)
-    TriggerEvent('erp_mdt:open', source)
-end, false)
-
-local known100s = {}
-
-RegisterCommand("signal100", function(source, args, rawCommand)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and
-            (xPlayer.job.name == 'police' or (xPlayer.job.name == 'ambulance' or xPlayer.job.name == 'doj')) then
-            local channel = tonumber(args[1])
-            if known100s[channel] then
-                known100s[channel] = nil
-                TriggerClientEvent('erp_mdt:sig100', -1, channel, false)
-            else
-                known100s[channel] = true
-                TriggerClientEvent('erp_mdt:sig100', -1, channel, true)
-            end
-
-        end
-    end
-end, false)
-
-RegisterNetEvent('erp_mdt:open')
-AddEventHandler('erp_mdt:open', function(source)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'ambulance' or xPlayer.job.name == 'doj')) then
-            TriggerClientEvent('erp_mdt:open', xPlayer.source, xPlayer.job.name, xPlayer.job.grade_label, xPlayer.variables.lastName, xPlayer.variables.firstName)
-        end
-    end
+RegisterServerEvent("rx_mdt:getAllLogs")
+AddEventHandler("rx_mdt:getAllLogs", function()
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_logs', {})
+    TriggerClientEvent("rx_mdt:getAllLogs", src, result)
 end)
 
-RegisterNetEvent('echorp:playerSpawned')
-AddEventHandler('echorp:playerSpawned', function(PlayerData)
-    local cid = PlayerData['cid']
-    if cid then
-        local callsign = GetCallsign(cid)
-        if callsign then
-            TriggerClientEvent('erp_mdt:updateCallsign', PlayerData['source'], callsign)
-        end
-    end
+RegisterServerEvent("rx_mdt:getAllIncidents")
+AddEventHandler("rx_mdt:getAllIncidents", function()
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_incidents', {})
+    TriggerClientEvent("rx_mdt:getAllIncidents", src, result)
 end)
 
-function GetCallsign(cid)
-    return exports.oxmysql:executeSync('SELECT callsign FROM `users` WHERE identifier = @id LIMIT 1', {["@id"] = cid})
-end
-exports('GetCallsign', GetCallsign) -- exports['erp_mdt']:GetCallsign(cid)
-
-
-function GetDuty(cid)
-    return exports.oxmysql:executeSync('SELECT duty FROM `users` WHERE identifier = @id LIMIT 1', {["@id"] = cid})
-end
-exports('GetDuty', GetDuty)
-
-AddEventHandler('erp_mdt:open', function(source)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and
-        (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-            local cs = GetCallsign(xPlayer.getIdentifier())
-            if cs then
-                TriggerClientEvent('erp_mdt:updateCallsign', xPlayer.source, cs[1].callsign)
-            end
-            local police, bcso, sast, sasp, doc, sapr, pa, ems = {}, {}, {}, {}, {}, {}, {}, {}
-            local players = ESX.GetExtendedPlayers()
-            for k, v in pairs(players) do
-			local callsign = GetCallsign(v.identifier)
-			local onduty = GetDuty(v.identifier)
-                if v.job.name == 'police' then
-                    local Radio = Player(v.source).state.radioChannel or 0
-                    if Radio > 100 then
-                        Radio = 0
-                    end
-                    table.insert(police, {
-                        cid = v.identifier,
-                        name = v.name,
-                        callsign = callsign[1].callsign,
-                        duty = onduty[1].duty,
-                        radio = Radio,
-                        sig100 = known100s[Radio]
-                    })
-                elseif v.job.name == 'bcso' then
-                    local Radio = Player(v.source).state.radioChannel or 0
-                    if Radio > 100 then
-                        Radio = 0
-                    end
-                    table.insert(bcso, {
-                        cid = v.identifier,
-                        name = v.name,
-                        callsign = callsign[1].callsign,
-                        duty = onduty[1].duty,
-                        radio = Radio,
-                        sig100 = known100s[Radio]
-                    })
-                elseif v.job.name == 'sast' then
-                    local Radio = Player(v.source).state.radioChannel or 0
-                    if Radio > 100 then
-                        Radio = 0
-                    end
-                    table.insert(sast, {
-                        cid = v.identifier,
-                        name = v.name,
-                        callsign = callsign[1].callsign,
-                        duty = onduty[1].duty,
-                        radio = Radio,
-                        sig100 = known100s[Radio]
-                    })
-                elseif v.job.name == 'sasp' then
-                    local Radio = Player(v.source).state.radioChannel or 0
-                    if Radio > 100 then
-                        Radio = 0
-                    end
-                    table.insert(sasp, {
-                        cid = v.identifier,
-                        name = v.name,
-                        callsign = callsign[1].callsign,
-                        duty = onduty[1].duty,
-                        radio = Radio,
-                        sig100 = known100s[Radio]
-                    })
-                elseif v.job.name == 'doc' then
-                    local Radio = Player(v.source).state.radioChannel or 0
-                    if Radio > 100 then
-                        Radio = 0
-                    end
-                    table.insert(doc, {
-                        cid = v.identifier,
-                        name = v.name,
-                        callsign = callsign[1].callsign,
-                        duty = onduty[1].duty,
-                        radio = Radio,
-                        sig100 = known100s[Radio]
-                    })
-                elseif v.job.name == 'sapr' then
-                    local Radio = Player(v.source).state.radioChannel or 0
-                    if Radio > 100 then
-                        Radio = 0
-                    end
-                    table.insert(sapr, {
-                        cid = v.identifier,
-                        name = v.name,
-                        callsign = callsign[1].callsign,
-                        duty = onduty[1].duty,
-                        radio = Radio
-                    })
-                elseif v.job.name == 'pa' then
-                    local Radio = Player(v.source).state.radioChannel or 0
-                    if Radio > 100 then
-                        Radio = 0
-                    end
-                    table.insert(pa, {
-                        cid = v.identifier,
-                        name = v.name,
-                        callsign = callsign[1].callsign,
-                        duty = onduty[1].duty,
-                        radio = Radio,
-                        sig100 = known100s[Radio]
-                    })
-                elseif v.job.name == 'ambulance' then
-                    local Radio = Player(v.source).state.radioChannel or 0
-                    if Radio > 100 then
-                        Radio = 0
-                    end
-                    table.insert(ems, {
-                        cid = v.identifier,
-                        name = v.name,
-                        callsign = callsign[1].callsign,
-                        duty = onduty[1].duty,
-                        radio = Radio,
-                        sig100 = known100s[Radio]
-                    })
-                end
-            end
-            TriggerClientEvent('erp_mdt:getActiveUnits', source, police, bcso, sast, sasp, doc, sapr, pa, ems)
-        end
-    end
-end)
-
-local function GetIncidentName(id, cb)
-    cb(exports.oxmysql:executeSync('SELECT title FROM `pd_incidents` WHERE id =  @id LIMIT 1', {
+RegisterServerEvent("rx_mdt:getIncidentData")
+AddEventHandler("rx_mdt:getIncidentData", function(id)
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_incidents WHERE id = @id', {
         ["@id"] = id
-    }))
+    })
+    result[1].tags = json.decode(result[1].tags)
+    result[1].officersinvolved = json.decode(result[1].officers)
+    result[1].civsinvolved = json.decode(result[1].civilians)
+    result[1].evidence = json.decode(result[1].evidence)
+    result[1].convictions = json.decode(result[1].associated)
+    result[1].charges = json.decode(result[1].associated.charges)
+    TriggerClientEvent("rx_mdt:updateIncidentDbId", src, result[1].id)
+    TriggerClientEvent("rx_mdt:getIncidentData", src, result[1], json.decode(result[1].associated))
+end)
+
+RegisterServerEvent("rx_mdt:incidentSearchPerson")
+AddEventHandler("rx_mdt:incidentSearchPerson", function(query1)
+    local src = source
+    local queryData = string.lower('%' .. query1 .. '%')
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        "SELECT firstname, lastname, identifier FROM `users`  WHERE LOWER(`firstname`) LIKE @var1 OR LOWER(`identifier`) LIKE @var2 OR LOWER(`lastname`) LIKE @var3 OR CONCAT(LOWER(`firstname`), ' ', LOWER(`lastname`), ' ', LOWER(`identifier`)) LIKE @var4",
+        {
+
+            ["@var1"] = queryData,
+            ["@var2"] = queryData,
+            ["@var3"] = queryData,
+            ["@var4"] = queryData
+
+        })
+    local mdw_profiles = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_profiles', {})
+    for k, v in pairs(result) do
+        result[k].firstname = v.firstname
+        result[k].lastname = v.lastname
+        result[k].profilepic =
+            "https://cdn.discordapp.com/attachments/904822052358336573/1016298208516915260/male.png"
+        for i = 1, #mdw_profiles do
+            if mdw_profiles[i].cid == v.identifier then
+                if mdw_profiles[i].image and mdw_profiles[i].image ~= nil then
+                    result[k].profilepic = mdw_profiles[i].image
+                end
+            end
+        end
+    end
+    TriggerClientEvent('rx_mdt:incidentSearchPerson', src, result)
+end)
+
+RegisterServerEvent("rx_mdt:removeIncidentCriminal")
+AddEventHandler("rx_mdt:removeIncidentCriminal", function(cid, icId)
+
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:removeIncidentCriminal)')
+        return
+    end
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    local time = os.time()
+    local action = "Odstranil občana z pátraní, ID záznamu: " .. icId
+    local Cname = ""
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', "SELECT * FROM mdw_incidents WHERE id = @id", {
+        ["@id"] = icId
+    })
+    for k, v in pairs(result) do
+        for k2, v2 in ipairs(json.decode(v.associated)) do
+            if v2.cid == cid then
+                table.remove(v2, k)
+                Cname = v2.name
+            end
+        end
+    end
+
+    local resukt = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = cid
+    })
+    TriggerEvent("rx_mdt:newLog", name .. ", " .. action .. ", Jméno: " .. Cname .. "", time)
+    MysqlConverter(Config.Mysql, 'execute', 'UPDATE mdw_incidents SET tags = @tags WHERE id = @id', {
+        ["@tags"] = json.encode(result[1].associated),
+        ["@id"] = icId
+    })
+end)
+
+RegisterServerEvent("rx_mdt:searchIncidents")
+AddEventHandler("rx_mdt:searchIncidents", function(query)
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', "SELECT * FROM `mdw_incidents` WHERE id = @query", {
+        ['@query'] = tonumber(query)
+    })
+
+    TriggerClientEvent('rx_mdt:getIncidents', src, result)
+end)
+
+RegisterServerEvent("rx_mdt:saveIncident")
+AddEventHandler("rx_mdt:saveIncident", function(data)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:saveIncident)')
+        return
+    end
+    for i = 1, #data.associated do
+        local result2 = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM users WHERE identifier = @identifier', {
+            ["@identifier"] = data.associated[i].cid
+        })
+        if result2 and result2[1] then
+            data.associated[i].name = result2[1].firstname .. " " .. result2[1].lastname
+        end
+        local xTarget = ESX.GetPlayerFromIdentifier(result2[1].identifier)
+        if tonumber(data.associated[i].fine) > 0 and data.ID == 0 then
+            exports['billing']:CreateBill(tonumber(data.associated[i].fine), xTarget, xPlayer)
+        end
+    end
+    if data.ID ~= 0 then
+        MysqlConverter(Config.Mysql, 'execute',
+            'UPDATE `mdw_incidents` SET `title` = @title, `author` = @author, `time` = @time, `details` = @details, `tags` = @tags, `officers` = @officers, `civilians` = @civilians, `evidence` = @evidence, `associated` = @associated WHERE `id` = @id',
+            {
+                ['@id'] = data.ID,
+                ['@title'] = data.title,
+                ['@author'] = name,
+                ['@time'] = data.time,
+                ['@details'] = data.information,
+                ['@tags'] = json.encode(data.tags),
+                ['@officers'] = json.encode(data.officers),
+                ['@civilians'] = json.encode(data.civilians),
+                ['@evidence'] = json.encode(data.evidence),
+                ['@associated'] = json.encode(data.associated)
+            })
+    else
+        MysqlConverter(Config.Mysql, 'execute',
+            'INSERT INTO `mdw_incidents` (`title`, `author`, `time`, `details`, `tags`, `officers`, `civilians`, `evidence`, `associated`) VALUES (@title, @author, @time, @details, @tags, @officers, @civilians, @evidence, @associated)',
+            {
+                ['@title'] = data.title,
+                ['@author'] = name,
+                ['@time'] = data.time,
+                ['@details'] = data.information,
+                ['@tags'] = json.encode(data.tags),
+                ['@officers'] = json.encode(data.officers),
+                ['@civilians'] = json.encode(data.civilians),
+                ['@evidence'] = json.encode(data.evidence),
+                ['@associated'] = json.encode(data.associated)
+            })
+    end
+end)
+
+RegisterServerEvent("rx_mdt:newTag")
+AddEventHandler("rx_mdt:newTag", function(cid, tag)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(src, 'Cheating, trigger event! (rx_mdt:newTag)')
+        return
+    end
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_profiles WHERE cid = @identifier', {
+        ['@identifier'] = cid
+    })
+    local newTags = {}
+    if result and result[1] then
+
+        result[1].tags = json.decode(result[1].tags)
+        table.insert(result[1].tags, tag)
+        MysqlConverter(Config.Mysql, 'execute', 'UPDATE `mdw_profiles` SET `tags` = @tags WHERE `cid` = @cid', {
+            ['@cid'] = cid,
+            ['@tags'] = json.encode(result[1].tags)
+        })
+    else
+        newTags[1] = tag
+        MysqlConverter(Config.Mysql, 'execute',
+            'INSERT INTO `mdw_profiles` (`cid`, `image`, `description`, `name`) VALUES (@cid, @image, @description, @name)',
+            {
+                ['@cid'] = cid,
+                ['@image'] = "",
+                ['@description'] = "",
+                ['@tags'] = json.encode(newTags),
+                ['@name'] = ""
+            })
+    end
+end)
+
+RegisterServerEvent("rx_mdt:removeProfileTag")
+AddEventHandler("rx_mdt:removeProfileTag", function(cid, tag)
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:removeProfileTag)')
+        return
+    end
+    local query = "SELECT * FROM mdw_profiles WHERE cid = ?"
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_profiles WHERE cid = @identifier', {
+        ['@identifier'] = cid
+    })
+    if result and result[1] then
+        result[1].tags = json.decode(result[1].tags)
+        for k, v in ipairs(result[1].tags) do
+            if v == tag then
+                table.remove(result[1].tags, k)
+            end
+        end
+        MysqlConverter(Config.Mysql, 'execute', 'UPDATE mdw_profiles SET tags = @tags WHERE cid = @identifier', {
+            ['@tags'] = json.encode(result[1].tags),
+            ['@identifier'] = cid
+        })
+    end
+end)
+
+RegisterServerEvent("rx_mdt:getPenalCode")
+AddEventHandler("rx_mdt:getPenalCode", function()
+    local src = source
+    local titles = {}
+    local penalcode = {}
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM fine_types ORDER BY category ASC', {})
+    for i = 1, #result do
+        local id = result[i].id
+        local res = result[i]
+        table.insert(titles, res.group)
+        local color = "green"
+        class = "Infraction"
+        if res.category == 0 then
+            color = "green"
+            class = "Záznam"
+        elseif res.category == 1 then
+            color = "orange"
+            class = "Přestupek"
+        elseif res.category == 2 or res.category == 3 then
+            color = "red"
+            class = "Trestný čin"
+        end
+
+        table.insert(penalcode, {
+            color = color,
+            title = res.label,
+            id = res.id,
+            class = class,
+            months = res.months,
+            fine = res.amount,
+            group = res.group
+        })
+
+    end
+    TriggerClientEvent('rx_mdt:getPenalCode', src, titles, penalcode)
+end)
+
+RegisterServerEvent("rx_mdt:getAllBolos")
+AddEventHandler("rx_mdt:getAllBolos", function()
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_bolos', {})
+    TriggerClientEvent("rx_mdt:getBolos", src, result)
+end)
+
+RegisterServerEvent("rx_mdt:getBoloData")
+AddEventHandler("rx_mdt:getBoloData", function(id)
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', "SELECT * FROM mdw_bolos WHERE dbid = @id", {
+        ["@id"] = id
+    })
+    result[1].tags = json.decode(result[1].tags)
+    result[1].gallery = json.decode(result[1].gallery)
+    result[1].officersinvolved = json.decode(result[1].officers)
+    result[1].officers = json.decode(result[1].officers)
+    TriggerClientEvent("rx_mdt:getBoloData", src, result[1])
+end)
+
+RegisterServerEvent("rx_mdt:searchBolos")
+AddEventHandler("rx_mdt:searchBolos", function(query)
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        "SELECT * FROM `mdw_bolos` WHERE LOWER(`license_plate`) LIKE @query OR LOWER(`title`) LIKE @query OR CONCAT(LOWER(`license_plate`), ' ', LOWER(`title`)) LIKE @query",
+        {
+            ['@query'] = string.lower('%' .. query .. '%') -- % wildcard, needed to search for all alike results
+        })
+    TriggerClientEvent("rx_mdt:getBolos", src, result)
+end)
+
+RegisterServerEvent("rx_mdt:newBolo")
+AddEventHandler("rx_mdt:newBolo", function(data)
+    if data.title == "" then
+        return
+    end
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:newBolo)')
+        return
+    end
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    local char = xPlayer.getIdentifier()
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM `mdw_bolos` WHERE `dbid` = @id', {
+        ['@id'] = data.id
+    })
+    if data.id ~= nil and data.id ~= 0 then
+        MysqlConverter(Config.Mysql, 'execute',
+            'UPDATE `mdw_bolos` SET `title` = @title, `license_plate` = @plate, `owner` = @owner, `individual` = @individual, `detail` = @detail, `tags` = @tags, `gallery` = @gallery, `officers` = @officers, `time` = @time, `author` = @author WHERE `dbid` = @id',
+            {
+                ['@title'] = data.title,
+                ['@plate'] = data.plate,
+                ['@owner'] = data.owner,
+                ['@individual'] = data.individual,
+                ['@detail'] = data.detail,
+                ['@tags'] = json.encode(data.tags),
+                ['@gallery'] = json.encode(data.gallery),
+                ['@officers'] = json.encode(data.officers),
+                ['@time'] = data.time,
+                ['@author'] = name,
+                ['@id'] = data.id
+            })
+    else
+        MysqlConverter(Config.Mysql, 'execute',
+            'INSERT INTO `mdw_bolos` (`title`, `license_plate`, `owner`, `individual`, `detail`, `tags`, `gallery`, `officers`, `time`, `author`) VALUES (@title, @plate, @owner, @individual, @detail, @tags, @gallery, @officers, @time, @author)',
+            {
+                ['@title'] = data.title,
+                ['@plate'] = data.plate,
+                ['@owner'] = data.owner,
+                ['@individual'] = data.individual,
+                ['@detail'] = data.detail,
+                ['@tags'] = json.encode(data.tags),
+                ['@gallery'] = json.encode(data.gallery),
+                ['@officers'] = json.encode(data.officers),
+                ['@time'] = data.time,
+                ['@author'] = name
+
+            })
+        local result2 = MysqlConverter(Config.Mysql, 'fetchAll',
+            "SELECT * FROM mdw_bolos ORDER BY dbid DESC LIMIT 1", {})
+        TriggerClientEvent("rx_mdt:boloComplete", src, result2[1].dbid)
+    end
+end)
+
+RegisterServerEvent("rx_mdt:deleteBolo")
+AddEventHandler("rx_mdt:deleteBolo", function(id)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:deleteBolo)')
+        return
+    end
+    MysqlConverter(Config.Mysql, 'execute', "DELETE FROM mdw_bolos WHERE dbid = @id", {
+        ["@id"] = id
+    })
+end)
+
+local attachedUnits = {}
+RegisterServerEvent("rx_mdt:attachedUnits")
+AddEventHandler("rx_mdt:attachedUnits", function(callid)
+    local src = source
+    if not attachedUnits[callid] then
+        local id = #attachedUnits + 1
+        attachedUnits[callid] = {}
+    end
+    TriggerClientEvent("rx_mdt:attachedUnits", src, attachedUnits[callid], callid)
+end)
+
+RegisterServerEvent("rx_mdt:callDragAttach")
+AddEventHandler("rx_mdt:callDragAttach", function(callid, cid)
+    local src = source
+
+    local targetPlayer = ESX.GetPlayerFromIdentifier(cid)
+    if targetPlayer == false then
+        return
+    end
+    local name = targetPlayer.variables.firstName .. " " .. targetPlayer.variables.lastName
+    local userjob = targetPlayer.getJob().name
+
+    local id = callid
+
+    attachedUnits[id] = {}
+    attachedUnits[id][cid] = {}
+
+    local units = 0
+    for k, v in ipairs(attachedUnits[id]) do
+        units = units + 1
+    end
+
+    attachedUnits[id][cid].job = userjob
+    attachedUnits[id][cid].callsign = GetCallsign(cid)
+    attachedUnits[id][cid].fullname = name
+    attachedUnits[id][cid].cid = cid
+    attachedUnits[id][cid].callid = callid
+    attachedUnits[id][cid].radio = units
+    TriggerClientEvent("rx_mdt:callAttach", -1, callid, units)
+end)
+
+RegisterServerEvent("rx_mdt:callAttach")
+AddEventHandler("rx_mdt:callAttach", function(callid)
+    local src = source
+
+    local xPlayer = ESX.GetPlayerFromId(src)
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    local userjob = xPlayer.getJob().name
+    local id = callid
+    local cid = xPlayer.getIdentifier()
+    attachedUnits[id] = {}
+    attachedUnits[id][cid] = {}
+
+    local units = 0
+    for k, v in pairs(attachedUnits[id]) do
+        units = units + 1
+    end
+    attachedUnits[id][cid].job = userjob
+    attachedUnits[id][cid].callsign = GetCallsign(cid)
+    attachedUnits[id][cid].fullname = name
+    attachedUnits[id][cid].cid = cid
+    attachedUnits[id][cid].callid = callid
+    attachedUnits[id][cid].radio = units
+
+    TriggerClientEvent("rx_mdt:callAttach", -1, callid, units)
+end)
+
+RegisterServerEvent("rx_mdt:callDetach")
+AddEventHandler("rx_mdt:callDetach", function(callid)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    local charid = xPlayer.getIdentifier()
+    local id = callid
+    attachedUnits[id][charid] = nil
+    local units = 0
+    for k, v in ipairs(attachedUnits[id]) do
+        units = units + 1
+    end
+    TriggerClientEvent("rx_mdt:callDetach", -1, callid, units)
+end)
+
+RegisterServerEvent("rx_mdt:callDispatchDetach")
+AddEventHandler("rx_mdt:callDispatchDetach", function(callid, cid)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    local id = callid
+
+    attachedUnits[id][cid] = nil
+
+    local units = 0
+    for k, v in ipairs(attachedUnits[id]) do
+        units = units + 1
+    end
+    TriggerClientEvent("rx_mdt:callDetach", -1, callid, units)
+end)
+
+RegisterServerEvent("rx_mdt:setWaypoint:unit")
+AddEventHandler("rx_mdt:setWaypoint:unit", function(cid)
+    local src = source
+
+    local targetPlayer = ESX.GetPlayerFromIdentifier(cid)
+    if targetPlayer == false then
+        return
+    end
+    local coords = targetPlayer.getCoords(true)
+    TriggerClientEvent("rx_mdt:setWaypoint:unit", src, coords)
+end)
+
+RegisterServerEvent("rx_mdt:setDispatchWaypoint")
+AddEventHandler("rx_mdt:setDispatchWaypoint", function(callid, cid)
+    local src = source
+    local targetPlayer = ESX.GetPlayerFromIdentifier(cid)
+    if targetPlayer == false then
+        return
+    end
+    local coords = targetPlayer.getCoords(true)
+    TriggerClientEvent("rx_mdt:setWaypoint:unit", src, coords)
+end)
+
+local CallResponses = {}
+
+RegisterServerEvent("rx_mdt:getCallResponses")
+AddEventHandler("rx_mdt:getCallResponses", function(callid)
+    local src = source
+    if not CallResponses[callid] then
+        CallResponses[callid] = {}
+    end
+    TriggerClientEvent("rx_mdt:getCallResponses", src, CallResponses[callid], callid)
+end)
+
+RegisterServerEvent("rx_mdt:sendCallResponse")
+AddEventHandler("rx_mdt:sendCallResponse", function(message, time, callid, name)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    local char = xPlayer.getIdentifier()
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    if not CallResponses[callid] then
+        CallResponses[callid] = {}
+    end
+    local id = #CallResponses[callid] + 1
+    CallResponses[callid][id] = {}
+
+    CallResponses[callid][id].name = name
+    CallResponses[callid][id].message = message
+    CallResponses[callid][id].time = time
+    
+    TriggerClientEvent("rx_mdt:sendCallResponse", src, message, time, callid, name)
+end)
+
+RegisterServerEvent("rx_mdt:getAllReports")
+AddEventHandler("rx_mdt:getAllReports", function()
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_reports', {})
+    TriggerClientEvent("rx_mdt:getAllReports", src, result)
+end)
+
+RegisterServerEvent("rx_mdt:getReportData")
+AddEventHandler("rx_mdt:getReportData", function(id)
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_reports WHERE dbid = @id', {
+        ["@id"] = id
+    })
+    result[1].tags = json.decode(result[1].tags)
+    result[1].gallery = json.decode(result[1].gallery)
+    result[1].officersinvolved = json.decode(result[1].officers)
+    result[1].officers = json.decode(result[1].officers)
+    result[1].civsinvolved = json.decode(result[1].civsinvolved)
+    TriggerClientEvent("rx_mdt:getReportData", src, result[1])
+end)
+
+RegisterServerEvent("rx_mdt:searchReports")
+AddEventHandler("rx_mdt:searchReports", function(querydata)
+    local src = source
+    local string = string.lower('%' .. querydata .. '%')
+    local result = MysqlConverter(Config.Mysql, 'fetchAll',
+        "SELECT * FROM mdw_reports aa WHERE LOWER(`type`) LIKE @var1 OR LOWER(`title`) LIKE @var2 OR LOWER(`dbid`) LIKE @var3 OR CONCAT(LOWER(`type`), ' ', LOWER(`title`), ' ', LOWER(`dbid`)) LIKE @var4",
+        {
+            ["@var1"] = string,
+            ["@var2"] = string,
+            ["@var3"] = string,
+            ["@var4"] = string
+        })
+    TriggerClientEvent("rx_mdt:getAllReports", src, result)
+end)
+
+RegisterServerEvent("rx_mdt:newReport")
+AddEventHandler("rx_mdt:newReport", function(data)
+    if data.title == "" then
+        return
+    end
+
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:newReport)')
+        return
+    end
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    local time = os.date()
+
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM `mdw_reports` WHERE `dbid` = @id', {
+        ['@id'] = data.id
+    })
+    if data.id ~= nil and data.id ~= 0 then
+
+        local action = "Upravil/a záznam, ID: " .. data.id
+        TriggerEvent("rx_mdt:newLog", name .. ", " .. action .. ", Zmena: " .. json.encode(data), time)
+
+        lib.logger(xPlayer.identifier, 'mdt', ('Hráč: **%s/%s %s** \nUpravil/a záznam \nID: **%s** \nZmena: **%s**'):format(GetPlayerName(src), name, GetCallsign(xPlayer.identifier), data.id, json.encode(data)))
+
+        MysqlConverter(Config.Mysql, 'execute',
+            'UPDATE `mdw_reports` SET `title` = @title, `type` = @type, `detail` = @detail, `tags` = @tags, `gallery` = @gallery, `officers` = @officers, `civsinvolved` = @civsinvolved, `time` = @time, `author` = @author WHERE `dbid` = @id',
+            {
+                ['@title'] = data.title,
+                ['@type'] = data.type,
+                ['@detail'] = data.detail,
+                ['@tags'] = json.encode(data.tags),
+                ['@gallery'] = json.encode(data.gallery),
+                ['@officers'] = json.encode(data.officers),
+                ['@civsinvolved'] = json.encode(data.civilians),
+                ['@time'] = data.time,
+                ['@author'] = name,
+                ['@id'] = data.id
+            })
+    else
+        MysqlConverter(Config.Mysql, 'execute',
+            'INSERT INTO `mdw_reports` (`title`, `type`, `detail`, `tags`, `gallery`, `officers`, `civsinvolved`, `time`, `author`) VALUES (@title, @type, @detail, @tags, @gallery, @officers, @civsinvolved, @time, @author)',
+            {
+                ['@title'] = data.title,
+                ['@type'] = data.type,
+                ['@detail'] = data.detail,
+                ['@tags'] = json.encode(data.tags),
+                ['@gallery'] = json.encode(data.gallery),
+                ['@officers'] = json.encode(data.officers),
+                ['@civsinvolved'] = json.encode(data.civilians),
+                ['@time'] = data.time,
+                ['@author'] = name
+            })
+        Wait(500)
+        local result2 = MysqlConverter(Config.Mysql, 'fetchAll',
+            "SELECT * FROM mdw_reports ORDER BY dbid DESC LIMIT 1", {})
+        TriggerClientEvent("rx_mdt:reportComplete", src, result2[1].dbid)
+    end
+end)
+
+function UpdateDispatch(src)
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', "SELECT * FROM mdw_messages LIMIT 200", {})
+    TriggerClientEvent("rx_mdt:dashboardMessages", src, result)
 end
 
-AddEventHandler('erp_mdt:open', function(source)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and  (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
+RegisterServerEvent("rx_mdt:sendMessage")
+AddEventHandler("rx_mdt:sendMessage", function(message, time)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:sendMessage)')
+        return
+    end
+    local char = xPlayer.getIdentifier()
+    local name = xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName
+    local pic = "https://cdn.discordapp.com/attachments/904822052358336573/1016298208516915260/male.png"
 
-            -- get warrants
-            exports.oxmysql:execute("SELECT * FROM pd_convictions WHERE warrant = '1'", {}, function(warrants)
-                for i = 1, #warrants do
-                    GetNameFromId(warrants[i]['cid'], function(res)
-                        if res and res[1] then
-                            warrants[i]['name'] = res[1]['firstname'] .. ' ' .. res[1]['lastname']
-                        else
-                            warrants[i]['name'] = "Unknown"
-                        end
-                    end)
-                    GetIncidentName(warrants[i]['linkedincident'], function(res)
-                        if res and res[1] then
-                            warrants[i]['reporttitle'] = res[1]['title']
-                        else
-                            warrants[i]['reporttitle'] = "Unknown report title"
-                        end
-                    end)
-                    warrants[i]['firsttime'] = i == 1
-                    TriggerClientEvent('erp_mdt:dashboardWarrants', xPlayer.source, warrants[i])
-                end
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-            exports.oxmysql:execute("SELECT * FROM `ems_reports` ORDER BY `id` DESC LIMIT 20", {}, function(matches)
-                TriggerClientEvent('erp_mdt:getAllReports', xPlayer.source, matches)
-            end)
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_profiles WHERE cid = @identifier', {
+        ["@identifier"] = char
+    })
+    if result and result[1] ~= nil then
+        if result[1].image and result[1].image ~= nil and result[1].image ~= "" then
+            pic = result[1].image
         end
     end
-end)
-
-AddEventHandler('erp_mdt:open', function(source)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        local calls = exports['erp_dispatch']:GetDispatchCalls()
-        for id, information in pairs(calls) do
-            if information['job'] then
-                local found = false
-                for i = 1, #information['job'] do
-                    if information['job'][i] == xPlayer.job.name then
-                        found = true
-                        break
-                    end
-                end
-                if not found then
-                    calls[id] = nil
-                end
-            end
-        end
-        TriggerClientEvent('erp_mdt:dashboardCalls', xPlayer.source, calls)
-    end
-end)
-
--- (End) Opening the MDT and sending data
-
--- (Start) Requesting profile information
-
-local function GetConvictions(cid, cb)
-    cb((exports.oxmysql:executeSync('SELECT * FROM `pd_convictions` WHERE `cid` = @cid', {
-        ["@cid"] = cid
-    })))
-end
-
-local function GetLicenseInfo(cid, cb)
-    cb(exports.oxmysql:executeSync('SELECT * FROM `user_licenses` WHERE `owner` = @cid', {
-        ["@cid"] = cid
-    }))
-end
-
-RegisterNetEvent('erp_mdt:searchProfile')
-AddEventHandler('erp_mdt:searchProfile', function(sentData)
-    if sentData then
-        local function PpPpPpic(sex, profilepic)
-            if profilepic then
-                return profilepic
-            end
-            if sex == "f" then
-                return "img/female.png"
-            end
-            return "img/male.png"
-        end
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                exports.oxmysql:execute(
-                    "SELECT id, identifier, firstname, lastname, sex, profilepic FROM `users` WHERE LOWER(`firstname`) LIKE @query OR LOWER(`lastname`) LIKE @query OR LOWER(`identifier`) LIKE @query OR CONCAT(LOWER(`firstname`), ' ', LOWER(`lastname`)) LIKE @query LIMIT 20",
-                    {
-                        ["@query"] = string.lower('%' .. sentData .. '%')
-                    }, function(people)
-                        for i = 1, #people do
-                            
-                            people[i]['warrant'] = false
-
-                            people[i]['theory'] = false
-                            people[i]['car'] = false
-                            people[i]['bike'] = false
-                            people[i]['truck'] = false
-
-                            people[i]['weapon'] = false
-                            people[i]['hunting'] = false
-                            people[i]['pilot'] = false
-                            people[i]['convictions'] = 0
-                            people[i]['pp'] = PpPpPpic(people[i]['sex'], people[i]['profilepic'])
-
-                            GetConvictions(people[i]['id'], function(cc)
-                                if cc then
-                                    for x = 1, #cc do
-                                        if cc[x] then
-                                            if cc[x]['warrant'] then
-                                                people[i]['warrant'] = true
-                                            end
-                                            if cc[x]['associated'] == "0" then
-                                                local charges = json.decode(cc[x]['charges'])
-                                                people[i]['convictions'] = people[i]['convictions'] + #charges
-                                            end
-                                        end
-                                    end
-                                end
-                            end)
-                            GetLicenseInfo(people[i]['identifier'], function(licenseinfo)
-                                if licenseinfo and #licenseinfo > 0 then
-                                    for suckdick = 1, #licenseinfo do
-                                        if licenseinfo[suckdick]['type'] == 'weapon' then
-                                            people[i]['weapon'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'theory' then
-                                            people[i]['theory'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'drive' then
-                                            people[i]['car'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'drive_bike' then
-                                            people[i]['bike'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'drive_truck' then
-                                            people[i]['truck'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'hunting' then
-                                            people[i]['hunting'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'pilot' then
-                                            people[i]['pilot'] = true
-                                        end
-                                    end
-                                end
-                            end)
-                        end
-
-                        TriggerClientEvent('erp_mdt:searchProfile', xPlayer.source, people)
-                    end)
-            elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-                exports.oxmysql:execute(
-                    "SELECT id, identifier, firstname, lastname, sex, profilepic, dateofbirth FROM `users` WHERE LOWER(`firstname`) LIKE @query OR LOWER(`lastname`) LIKE @query OR LOWER(`identifier`) LIKE @query OR CONCAT(LOWER(`firstname`), ' ', LOWER(`lastname`)) LIKE @query LIMIT 20",
-                    {
-                        ["@query"] = string.lower('%' .. sentData .. '%')
-                    }, function(people)
-                        for i = 1, #people do
-                            people[i]['warrant'] = false
-                            people[i]['theory'] = false
-                            people[i]['car'] = false
-                            people[i]['bike'] = false
-                            people[i]['truck'] = false
-                            people[i]['weapon'] = false
-                            people[i]['hunting'] = false
-                            people[i]['pilot'] = false
-                            people[i]['pp'] = PpPpPpic(people[i]['sex'], people[i]['profilepic'])
-                            GetLicenseInfo(people[i]['identifier'], function(licenseinfo)
-                                if licenseinfo and #licenseinfo > 0 then
-                                    for suckdick = 1, #licenseinfo do
-                                        if licenseinfo[suckdick]['type'] == 'weapon' then
-                                            people[i]['weapon'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'theory' then
-                                            people[i]['theory'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'drive' then
-                                            people[i]['car'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'drive_bike' then
-                                            people[i]['bike'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'drive_truck' then
-                                            people[i]['truck'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'hunting' then
-                                            people[i]['hunting'] = true
-                                        elseif licenseinfo[suckdick]['type'] == 'pilot' then
-                                            people[i]['pilot'] = true
-                                        end
-                                    end
-                                end
-                            end)
-                        end
-
-                        TriggerClientEvent('erp_mdt:searchProfile', xPlayer.source, people, true)
-                    end)
-            end
-        end
-    end
-end)
-
--- (End) Requesting profile information
-
--- (Start) Bulletin
-
-RegisterNetEvent('erp_mdt:opendashboard')
-AddEventHandler('erp_mdt:opendashboard', function()
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and xPlayer.job.name == 'police' then
-            exports.oxmysql:execute('SELECT * FROM `pd_bulletin`', {}, function(bulletin)
-                TriggerClientEvent('erp_mdt:dashboardbulletin', xPlayer.source, bulletin)
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-            exports.oxmysql:execute('SELECT * FROM `ems_bulletin`', {}, function(bulletin)
-                TriggerClientEvent('erp_mdt:dashboardbulletin', xPlayer.source, bulletin)
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'doj') then
-            exports.oxmysql:execute('SELECT * FROM `doj_bulletin`', {}, function(bulletin)
-                TriggerClientEvent('erp_mdt:dashboardbulletin', xPlayer.source, bulletin)
-            end)
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:newBulletin')
-AddEventHandler('erp_mdt:newBulletin', function(title, info, time)
-    if title and info and time then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and xPlayer.job.name == 'police' then
-                exports.oxmysql:insert(
-                    'INSERT INTO `pd_bulletin` (`title`, `desc`, `author`, `time`) VALUES (@title, @desc, @author, @time)',
-                    {
-                        ["@title"] = title,
-                        ["@desc"] = info,
-                        ["@author"] = xPlayer.name,
-                        ["@time"] = tostring(time)
-                    }, function(sqlresult)
-                        TriggerEvent('erp_mdt:AddLog', "A new bulletin was added by " .. xPlayer.variables.firstName .. " " ..
-                            xPlayer.variables.lastName .. " with the title: " .. title .. "!")
-                        TriggerClientEvent('erp_mdt:newBulletin', -1, xPlayer.source, {
-                            id = sqlresult,
-                            title = title,
-                            info = info,
-                            time = time,
-                            author = xPlayer.name
-                        }, 'police')
-                    end)
-            elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-                exports.oxmysql:insert(
-                    'INSERT INTO `ems_bulletin` (`title`, `desc`, `author`, `time`) VALUES (@title, @desc, @author, @time)',
-                    {
-                        ["@title"] = title,
-                        ["@desc"] = info,
-                        ["@author"] = xPlayer.name,
-                        ["@time"] = tostring(time)
-                    }, function(sqlresult)
-                        TriggerEvent('erp_mdt:AddLog', "A new bulletin was added by " .. xPlayer.variables.firstName .. " " ..
-                            xPlayer.variables.lastName .. " with the title: " .. title .. "!")
-                        TriggerClientEvent('erp_mdt:newBulletin', -1, xPlayer.source, {
-                            id = sqlresult,
-                            title = title,
-                            info = info,
-                            time = time,
-                            author = xPlayer.name
-                        }, xPlayer.job.name)
-                    end)
-            elseif xPlayer.job and (xPlayer.job.name == 'doj') then
-                exports.oxmysql:insert(
-                    'INSERT INTO `doj_bulletin` (`title`, `desc`, `author`, `time`) VALUES (@title, @desc, @author, @time)',
-                    {
-                        ["@title"] = title,
-                        ["@desc"] = info,
-                        ["@author"] = xPlayer.name,
-                        ["@time"] = tostring(time)
-                    }, function(sqlresult)
-                        TriggerEvent('erp_mdt:AddLog', "A new bulletin was added by " .. xPlayer.variables.firstName .. " " ..
-                            xPlayer.variables.lastName .. " with the title: " .. title .. "!")
-                        TriggerClientEvent('erp_mdt:newBulletin', -1, xPlayer.source, {
-                            id = sqlresult,
-                            title = title,
-                            info = info,
-                            time = time,
-                            author = xPlayer.name
-                        }, xPlayer.job.name)
-                    end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:deleteBulletin')
-AddEventHandler('erp_mdt:deleteBulletin', function(id)
-    if id then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and xPlayer.job.name == 'police' then
-                exports.oxmysql:execute('SELECT `title` FROM `pd_bulletin` WHERE id= @id LIMIT 1', {
-                    ["@id"] = id
-                }, function(res)
-                    if res and res[1] then
-                        exports.oxmysql:executeSync("DELETE FROM `pd_bulletin` WHERE id= @id", {
-                            ["@id"] = id
-                        })
-                        TriggerEvent('erp_mdt:AddLog',
-                            "A bulletin was deleted by " .. xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName ..
-                                " with the title: " .. res[1]['title'] .. "!")
-                        TriggerClientEvent('erp_mdt:deleteBulletin', -1, xPlayer.source, id, 'police')
-                    end
-                end)
-            elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-                exports.oxmysql:execute('SELECT `title` FROM `ems_bulletin` WHERE id= @id LIMIT 1', {
-                    ["@id"] = id
-                }, function(res)
-                    if res and res[1] then
-                        exports.oxmysql:executeSync("DELETE FROM `ems_bulletin` WHERE id= @id", {
-                            ["@id"] = id
-                        })
-                        TriggerEvent('erp_mdt:AddLog',
-                            "A bulletin was deleted by " .. xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName ..
-                                " with the title: " .. res[1]['title'] .. "!")
-                        TriggerClientEvent('erp_mdt:deleteBulletin', -1, xPlayer.source, id, xPlayer.job.name)
-                    end
-                end)
-            elseif xPlayer.job and (xPlayer.job.name == 'doj') then
-                exports.oxmysql:execute('SELECT `title` FROM `doj_bulletin` WHERE id= @id LIMIT 1', {
-                    ["@id"] = id
-                }, function(res)
-                    if res and res[1] then
-                        exports.oxmysql:executeSync("DELETE FROM `doj_bulletin` WHERE id= @id", {
-                            ["@id"] = id
-                        })
-                        TriggerEvent('erp_mdt:AddLog',
-                            "A bulletin was deleted by " .. xPlayer.variables.firstName .. " " .. xPlayer.variables.lastName ..
-                                " with the title: " .. res[1]['title'] .. "!")
-                        TriggerClientEvent('erp_mdt:deleteBulletin', -1, xPlayer.source, id, xPlayer.job.name)
-                    end
-                end)
-            end
-        end
-    end
-end)
-
-local function CreateUser(cid, dbname, cb)
-    cb(exports.oxmysql:insert("INSERT INTO `" .. dbname .. "` (cid) VALUES (@cid)", {
-        ["@cid"] = cid
-    }))
-    TriggerEvent('erp_mdt:AddLog', "A user was created with the CID: " .. cid)
-end
-
-local function GetPersonInformation(cid, table, cb)
-    cb(exports.oxmysql:executeSync('SELECT information, tags, gallery FROM ' .. table .. ' WHERE cid = @cid', {
-        ["@cid"] = cid
-    }))
-end
-
-local function GetVehicleInformation(cid, cb)
-    cb(exports.oxmysql:executeSync('SELECT owner, plate, vehicle FROM owned_vehicles WHERE owner = @cid', {
-        ["@cid"] = cid
-    }))
-end
-
-RegisterNetEvent('erp_mdt:getProfileData')
-AddEventHandler('erp_mdt:getProfileData', function(sentId)
-    local sentId = tonumber(sentId)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-            exports.oxmysql:execute(
-                'SELECT id, identifier, firstname, lastname, job, profilepic, sex, dateofbirth FROM users WHERE id = @id LIMIT 1',
-                {
-                    ["@id"] = sentId
-                }, function(user)
-                    if user and user[1] then
-
-                        local function PpPpPpic(sex, profilepic)
-                            if profilepic then
-                                return profilepic
-                            end
-                            if sex == "f" then
-                                return "img/female.png"
-                            end
-                            return "img/male.png"
-                        end
-
-                        local object = {
-                            cid = user[1]['id'],
-							identifier = user[1]['identifier'],
-                            firstname = user[1]['firstname'],
-                            lastname = user[1]['lastname'],
-                            job = user[1]['job'],
-                            dateofbirth = user[1]['dateofbirth'],
-                            profilepic = PpPpPpic(user[1]['sex'], user[1]['profilepic']),
-                            policemdtinfo = '',
-                            theory = false,
-                            car = false,
-                            bike = false,
-                            truck = false,
-                            weapon = false,
-                            hunting = false,
-                            pilot = false,
-                            tags = {},
-                            vehicles = {},
-                            properties = {},
-                            gallery = {},
-                            convictions = {}
-                        }
-
-                        -- TriggerEvent('echorp:getJobInfo', object['job'], function(res)
-                            -- if res then
-                                -- object['job'] = res['label']
-                            -- end
-                        -- end)
-
-                        GetConvictions(object['cid'], function(cc)
-                            for x = 1, #cc do
-                                if cc[x] then
-                                    if cc[x]['associated'] == "0" then
-                                        local charges = json.decode(cc[x]['charges'])
-                                        for suckdick = 1, #charges do
-                                            table.insert(object['convictions'], charges[suckdick])
-                                        end
-                                    end
-                                end
-                            end
-                        end)
-
-                        -- print(json.encode(object['convictions']))
-
-                        GetPersonInformation(object['cid'], 'policemdtdata', function(information)
-                            if information[1] then
-                                object['policemdtinfo'] = information[1]['information']
-                                object['tags'] = json.decode(information[1]['tags'])
-                                object['gallery'] = json.decode(information[1]['gallery'])
-                            end
-                        end) -- Tags, Gallery, User Information
-
-                        GetLicenseInfo(object['identifier'], function(licenseinfo)
-                            if licenseinfo and #licenseinfo > 0 then
-                                for suckdick = 1, #licenseinfo do
-                                    if licenseinfo[suckdick]['type'] == 'weapon' then
-                                        object['weapon'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'theory' then
-                                        object['theory'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'drive' then
-                                        object['car'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'drive_bike' then
-                                        object['bike'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'drive_truck' then
-                                        object['truck'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'hunting' then
-                                        object['hunting'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'pilot' then
-                                        object['pilot'] = true
-                                    end
-                                end
-                            end
-                        end) -- Licenses
-
-                        GetVehicleInformation(object['identifier'], function(res)
-                            local vehicleInfo = {}
-                            for i = 1, #res do
-                                local vehicle = json.decode(res[i]['vehicle'])
-                                local model = "Unknown"
-                                if json.encode(vehicle) ~= "null" then
-                                    model = vehicle['model']
-                                end
-                                table.insert(vehicleInfo, {
-                                    id = res[i]['id'],
-                                    model = model,
-                                    plate = res[i]['plate']
-                                })
-                            end
-                            object['vehicles'] = vehicleInfo
-
-                        end) -- Vehicles
-
-                        -- local houses = exports['erp-housing']:GetHouses()
-                        local myHouses = {}
-                        --[[for i=1, #houses do
-							local thisHouse = houses[i]
-							if thisHouse['cid'] == cid then
-								table.insert(myHouses, thisHouse)
-							end 
-						end]]
-
-                        object['properties'] = myHouses
-                        TriggerClientEvent('erp_mdt:getProfileData', xPlayer.source, object)
-                    end
-                end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-            exports.oxmysql:execute(
-                'SELECT id, identifier, firstname, lastname, job, profilepic, sex, dateofbirth FROM users WHERE identifier = @id LIMIT 1',
-                {
-                    ["@id"] = sentId
-                }, function(user)
-                    if user and user[1] then
-
-                        local function PpPpPpic(sex, profilepic)
-                            if profilepic then
-                                return profilepic
-                            end
-                            if sex == "f" then
-                                return "img/female.png"
-                            end
-                            return "img/male.png"
-                        end
-
-                        local object = {
-                            cid = user[1]['id'],
-							identifier = user[1]['identifier'],
-                            firstname = user[1]['firstname'],
-                            lastname = user[1]['lastname'],
-                            dateofbirth = user[1]['dateofbirth'],
-                            job = user[1]['job'],
-                            profilepic = PpPpPpic(user[1]['sex'], user[1]['profilepic']),
-                            policemdtinfo = '',
-                            theory = false,
-                            car = false,
-                            bike = false,
-                            truck = false,
-                            weapon = false,
-                            hunting = false,
-                            pilot = false,
-                            tags = {},
-                            properties = {},
-                            gallery = {}
-                        }
-
-                        -- TriggerEvent('echorp:getJobInfo', object['job'], function(res)
-                            -- if res then
-                                -- object['job'] = res['label']
-                            -- end
-                        -- end)
-
-                        GetPersonInformation(object['cid'], 'emsmdtdata', function(information)
-                            if information[1] then
-                                object['policemdtinfo'] = information[1]['information']
-                                object['tags'] = json.decode(information[1]['tags'])
-                                object['gallery'] = json.decode(information[1]['gallery'])
-                            end
-                        end) -- Tags, Gallery, User Information
-
-                        GetLicenseInfo(object['identifier'], function(licenseinfo)
-                            if licenseinfo and #licenseinfo > 0 then
-                                for suckdick = 1, #licenseinfo do
-                                    if licenseinfo[suckdick]['type'] == 'weapon' then
-                                        object['weapon'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'theory' then
-                                        object['theory'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'drive' then
-                                        object['car'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'drive_bike' then
-                                        object['bike'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'drive_truck' then
-                                        object['truck'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'hunting' then
-                                        object['hunting'] = true
-                                    elseif licenseinfo[suckdick]['type'] == 'pilot' then
-                                        object['pilot'] = true
-                                    end
-                                end
-                            end
-                        end) -- Licenses
-
-                        TriggerClientEvent('erp_mdt:getProfileData', xPlayer.source, object, true)
-                    end
-                end)
-        end
-    end
-end)
-
-RegisterNetEvent("erp_mdt:saveProfile")
-AddEventHandler('erp_mdt:saveProfile', function(pfp, information, cid, fName, sName)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-            local function UpdateInfo(id, pfp, desc)
-                exports.oxmysql:executeSync(
-                    "UPDATE policemdtdata SET `information` = @information WHERE `cid` = @id LIMIT 1", {
-                        ["@id"] = cid,
-                        ["@information"] = information
-                    })
-                exports.oxmysql:executeSync("UPDATE users SET `profilepic` = @profilepic WHERE `id`= @id LIMIT 1",
-                    {
-                        ["@id"] = cid,
-                        ["@profilepic"] = pfp
-                    })
-                TriggerEvent('erp_mdt:AddLog',
-                    "A user with the Citizen ID " .. cid .. " was updated by " .. xPlayer.name)
-
-                if xPlayer.job.name == 'doj' then
-                    exports.oxmysql:executeSync(
-                        "UPDATE users SET `firstname` = @firstname, `lastname` = @lastname WHERE `identifier`= @id LIMIT 1",
-                        {
-                            ["@firstname"] = fName,
-                            ["@lastname"] = sName,
-                            ["@id"] = cid
-                        })
-                end
-            end
-
-            exports.oxmysql:execute('SELECT id FROM policemdtdata WHERE cid = @cid LIMIT 1', {
-                ["@cid"] = cid
-            }, function(user)
-                if user and user[1] then
-                    UpdateInfo(user[1]['id'], pfp, information)
-                else
-                    CreateUser(cid, 'policemdtdata', function(xPlayer)
-                        UpdateInfo(xPlayer, pfp, information)
-                    end)
-                end
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-            local function UpdateInfo(id, pfp, desc)
-                exports.oxmysql:executeSync("UPDATE emsmdtdata SET `information` = @information WHERE `id` = @id LIMIT 1", {
-                    ["@id"] = id,
-                    ["@information"] = information
-                })
-                exports.oxmysql:executeSync("UPDATE users SET `profilepic`=:profilepic WHERE `identifier`= @id LIMIT 1",
-                    {
-                        id = cid,
-                        profilepic = pfp
-                    })
-                TriggerEvent('erp_mdt:AddLog',
-                    "A user with the Citizen ID " .. cid .. " was updated by " .. xPlayer.name)
-            end
-
-            exports.oxmysql:execute('SELECT id FROM emsmdtdata WHERE cid=:cid LIMIT 1', {
-                cid = cid
-            }, function(user)
-                if user and user[1] then
-                    UpdateInfo(user[1]['id'], pfp, information)
-                else
-                    CreateUser(cid, 'emsmdtdata', function(xPlayer)
-                        UpdateInfo(xPlayer, pfp, information)
-                    end)
-                end
-            end)
-        end
-    end
-end)
-
-RegisterNetEvent("erp_mdt:newTag")
-AddEventHandler('erp_mdt:newTag', function(cid, tag)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-            local function UpdateTags(id, tags)
-                exports.oxmysql:executeSync("UPDATE policemdtdata SET `tags` = @tags WHERE `id`= @id LIMIT 1", {
-                    ["@id"] = id,
-                    ["tags"] = json.encode(tags)
-                })
-                TriggerEvent('erp_mdt:AddLog', "A user with the Citizen ID " .. id ..
-                    " was added a new tag with the text (" .. tag .. ") by " .. xPlayer.name)
-            end
-
-            exports.oxmysql:execute('SELECT id, tags FROM policemdtdata WHERE cid = @cid LIMIT 1', {
-                ["@cid"] = cid
-            }, function(user)
-                if user and user[1] then
-                    local tags = json.decode(user[1]['tags'])
-                    table.insert(tags, tag)
-                    UpdateTags(user[1]['id'], tags)
-                else
-                    CreateUser(cid, 'policemdtdata', function(xPlayer)
-                        local tags = {}
-                        table.insert(tags, tag)
-                        UpdateTags(xPlayer, tags)
-                    end)
-                end
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-            local function UpdateTags(id, tags)
-                exports.oxmysql:executeSync("UPDATE emsmdtdata SET `tags` = @tags WHERE `id`= @id LIMIT 1", {
-                    ["@id"] = id,
-                    ["tags"] = json.encode(tags)
-                })
-                TriggerEvent('erp_mdt:AddLog', "A user with the Citizen ID " .. id ..
-                    " was added a new tag with the text (" .. tag .. ") by " .. xPlayer.name)
-            end
-
-            exports.oxmysql:execute('SELECT id, tags FROM emsmdtdata WHERE cid = @cid LIMIT 1', {
-                ["@cid"] = cid
-            }, function(user)
-                if user and user[1] then
-                    local tags = json.decode(user[1]['tags'])
-                    table.insert(tags, tag)
-                    UpdateTags(user[1]['id'], tags)
-                else
-                    CreateUser(cid, 'emsmdtdata', function(xPlayer)
-                        local tags = {}
-                        table.insert(tags, tag)
-                        UpdateTags(xPlayer, tags)
-                    end)
-                end
-            end)
-        end
-    end
-end)
-
-RegisterNetEvent("erp_mdt:removeProfileTag")
-AddEventHandler('erp_mdt:removeProfileTag', function(cid, tagtext)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-
-            local function UpdateTags(id, tag)
-                exports.oxmysql:executeSync("UPDATE policemdtdata SET `tags` = @tags WHERE `id`= @id LIMIT 1", {
-                    ["@id"] = id,
-                    ["@tags"] = json.encode(tag)
-                })
-                TriggerEvent('erp_mdt:AddLog',
-                    "A user with the Citizen ID " .. id .. " was removed of a tag with the text (" .. tagtext .. ") by " ..
-                        xPlayer.name)
-            end
-
-            exports.oxmysql:execute('SELECT id, tags FROM policemdtdata WHERE cid = @cid LIMIT 1', {
-                ["@cid"] = cid
-            }, function(user)
-                if user and user[1] then
-                    local tags = json.decode(user[1]['tags'])
-                    for i = 1, #tags do
-                        if tags[i] == tagtext then
-                            table.remove(tags, i)
-                        end
-                    end
-                    UpdateTags(user[1]['id'], tags)
-                else
-                    CreateUser(cid, 'policemdtdata', function(xPlayer)
-                        UpdateTags(xPlayer, {})
-                    end)
-                end
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-
-            local function UpdateTags(id, tag)
-                exports.oxmysql:executeSync("UPDATE emsmdtdata SET `tags` = @tags WHERE `id` = @id LIMIT 1", {
-                    ["@id"] = id,
-                    ["@tags"] = json.encode(tag)
-                })
-                TriggerEvent('erp_mdt:AddLog',
-                    "A user with the Citizen ID " .. id .. " was removed of a tag with the text (" .. tagtext .. ") by " ..
-                        xPlayer.name)
-            end
-
-            exports.oxmysql:execute('SELECT id, tags FROM emsmdtdata WHERE cid = @cid LIMIT 1', {
-                ["@cid"] = cid
-            }, function(user)
-                if user and user[1] then
-                    local tags = json.decode(user[1]['tags'])
-                    for i = 1, #tags do
-                        if tags[i] == tagtext then
-                            table.remove(tags, i)
-                        end
-                    end
-                    UpdateTags(user[1]['id'], tags)
-                else
-                    CreateUser(cid, 'emsmdtdata', function(xPlayer)
-                        UpdateTags(xPlayer, {})
-                    end)
-                end
-            end)
-        end
-    end
-end)
-
-RegisterNetEvent("erp_mdt:updateLicense")
-AddEventHandler('erp_mdt:updateLicense', function(cid, type, status)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    GetIdentifierFromCid(cid, function(res) licensecid = res[1].identifier	end)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'doj' and xPlayer.job.grade >= 8)) then
-            if status == 'give' then
-				exports.oxmysql:executeSync('INSERT INTO user_licenses (type, owner, status) VALUES(@type, @owner, @status)', {['@type'] = type, ['@owner'] = licensecid, ['@status'] = 1})
-            elseif status == 'revoke' then
-			exports.oxmysql:executeSync('DELETE FROM user_licenses WHERE owner = @identifier AND type = @type', {['@identifier'] = licensecid, ['@type'] = type})
-            end
-        end
-    end
-end)
-
-RegisterNetEvent("erp_mdt:addGalleryImg")
-AddEventHandler('erp_mdt:addGalleryImg', function(cid, img)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-
-            local function UpdateGallery(id, gallery)
-                exports.oxmysql:executeSync("UPDATE policemdtdata SET `gallery` = :gallery WHERE `id`= @id LIMIT 1", {
-                    ["@id"] = id,
-                    ["@gallery"] = json.encode(gallery)
-                })
-                TriggerEvent('erp_mdt:AddLog', "A user with the Citizen ID " .. id ..
-                    " had their gallery updated (+) by " .. xPlayer.name)
-            end
-
-            exports.oxmysql:execute('SELECT id, gallery FROM policemdtdata WHERE cid = @cid LIMIT 1', {
-                ["@cid"] = cid
-            }, function(user)
-                if user and user[1] then
-                    local imgs = json.decode(user[1]['gallery'])
-                    table.insert(imgs, img)
-                    UpdateGallery(user[1]['id'], imgs)
-                else
-                    CreateUser(cid, 'policemdtdata', function(xPlayer)
-                        local imgs = {}
-                        table.insert(imgs, img)
-                        UpdateGallery(xPlayer, imgs)
-                    end)
-                end
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-
-            local function UpdateGallery(id, gallery)
-                exports.oxmysql:executeSync("UPDATE emsmdtdata SET `gallery`= @gallery WHERE `id` = @id LIMIT 1", {
-                    ["@cid"] = id,
-                    ["@gallery"] = json.encode(gallery)
-                })
-                TriggerEvent('erp_mdt:AddLog', "A user with the Citizen ID " .. id ..
-                    " had their gallery updated (+) by " .. xPlayer.name)
-            end
-
-            exports.oxmysql:execute('SELECT id, gallery FROM emsmdtdata WHERE cid = @cid LIMIT 1', {
-                ["@cid"] = cid
-            }, function(user)
-                if user and user[1] then
-                    local imgs = json.decode(user[1]['gallery'])
-                    table.insert(imgs, img)
-                    UpdateGallery(user[1]['id'], imgs)
-                else
-                    CreateUser(cid, 'emsmdtdata', function(xPlayer)
-                        local imgs = {}
-                        table.insert(imgs, img)
-                        UpdateGallery(xPlayer, imgs)
-                    end)
-                end
-            end)
-        end
-    end
-end)
-
-RegisterNetEvent("erp_mdt:removeGalleryImg")
-AddEventHandler('erp_mdt:removeGalleryImg', function(cid, img)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-
-            local function UpdateGallery(id, gallery)
-                exports.oxmysql:executeSync("UPDATE policemdtdata SET `gallery` = @gallery WHERE `id`= @id LIMIT 1", {
-                    ["@id"] = id,
-                    ["@gallery"] = json.encode(gallery)
-                })
-                TriggerEvent('erp_mdt:AddLog', "A user with the Citizen ID " .. id ..
-                    " had their gallery updated (-) by " .. xPlayer.name)
-            end
-
-            exports.oxmysql:execute('SELECT id, gallery FROM policemdtdata WHERE cid = @cid LIMIT 1', {
-                ["@cid"] = cid
-            }, function(user)
-                if user and user[1] then
-                    local imgs = json.decode(user[1]['gallery'])
-                    -- table.insert(imgs, img)
-                    for i = 1, #imgs do
-                        if imgs[i] == img then
-                            table.remove(imgs, i)
-                        end
-                    end
-
-                    UpdateGallery(user[1]['id'], imgs)
-                else
-                    CreateUser(cid, 'policemdtdata', function(xPlayer)
-                        local imgs = {}
-                        UpdateGallery(xPlayer, imgs)
-                    end)
-                end
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-
-            local function UpdateGallery(id, gallery)
-                exports.oxmysql:executeSync("UPDATE emsmdtdata SET `gallery` = @gallery WHERE `id`= @id LIMIT 1", {
-                    ["@id"] = id,
-                    ["@gallery"] = json.encode(gallery)
-                })
-                TriggerEvent('erp_mdt:AddLog', "A user with the Citizen ID " .. id ..
-                    " had their gallery updated (-) by " .. xPlayer.name)
-            end
-
-            exports.oxmysql:execute('SELECT id, gallery FROM emsmdtdata WHERE cid = @cid LIMIT 1', {
-                ["@cid"] = cid
-            }, function(user)
-                if user and user[1] then
-                    local imgs = json.decode(user[1]['gallery'])
-                    -- table.insert(imgs, img)
-                    for i = 1, #imgs do
-                        if imgs[i] == img then
-                            table.remove(imgs, i)
-                        end
-                    end
-
-                    UpdateGallery(user[1]['id'], imgs)
-                else
-                    CreateUser(cid, 'emsmdtdata', function(xPlayer)
-                        local imgs = {}
-                        UpdateGallery(xPlayer, imgs)
-                    end)
-                end
-            end)
-        end
-    end
-end)
-
--- Incidents
-
-RegisterNetEvent('erp_mdt:getAllIncidents')
-AddEventHandler('erp_mdt:getAllIncidents', function()
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-            exports.oxmysql:execute("SELECT * FROM `pd_incidents` ORDER BY `id` DESC LIMIT 30", {}, function(matches)
-                TriggerClientEvent('erp_mdt:getAllIncidents', xPlayer.source, matches)
-            end)
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:searchIncidents')
-AddEventHandler('erp_mdt:searchIncidents', function(query)
-    if query then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                exports.oxmysql:execute(
-                    "SELECT * FROM `pd_incidents` WHERE `id` LIKE @query OR LOWER(`title`) LIKE @query OR LOWER(`author`) LIKE @query OR LOWER(`details`) LIKE @query OR LOWER(`tags`) LIKE @query OR LOWER(`officersinvolved`) LIKE @query OR LOWER(`civsinvolved`) LIKE @query OR LOWER(`author`) LIKE @query ORDER BY `id` DESC LIMIT 50",
-                    {
-                        ["@query"] = string.lower('%' .. query .. '%') -- % wildcard, needed to search for all alike results
-                    }, function(matches)
-                        TriggerClientEvent('erp_mdt:getIncidents', xPlayer.source, matches)
-                    end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:getIncidentData')
-AddEventHandler('erp_mdt:getIncidentData', function(sentId)
-    if sentId then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                exports.oxmysql:execute("SELECT * FROM `pd_incidents` WHERE `id` = @id", {
-                    ["@id"] = sentId
-                }, function(matches)
-                    local data = matches[1]
-                    data['tags'] = json.decode(data['tags'])
-                    data['officersinvolved'] = json.decode(data['officersinvolved'])
-                    data['civsinvolved'] = json.decode(data['civsinvolved'])
-                    data['evidence'] = json.decode(data['evidence'])
-                    exports.oxmysql:execute("SELECT * FROM `pd_incidents` WHERE `id` =  @id", {
-                        ["@id"] = sentId
-                    }, function(matches)
-                        exports.oxmysql:execute("SELECT * FROM `pd_convictions` WHERE `linkedincident` =  @id", {
-                            ["@id"] = sentId
-                        }, function(convictions)
-                            for i = 1, #convictions do
-                                GetNameFromId(convictions[i]['cid'], function(res)
-                                    if res and res[1] then
-                                        convictions[i]['name'] = res[1]['firstname'] .. ' ' .. res[1]['lastname']
-                                    else
-                                        convictions[i]['name'] = "Unknown"
-                                    end
-                                end)
-                                convictions[i]['charges'] = json.decode(convictions[i]['charges'])
-                            end
-                            TriggerClientEvent('erp_mdt:getIncidentData', xPlayer.source, data, convictions)
-                        end)
-                    end)
-                end)
-            end
-        end
-    end
-end)
-
-local debug = false
-
-if debug then
-    CreateThread(function()
-        local data = {
-            [1] = {
-                cid = 1990,
-                name = "Flakey"
-            },
-            [2] = {
-                cid = 1523,
-                name = "Test User"
-            }
-        }
-        print(json.encode(data))
-    end)
-end
-
-RegisterNetEvent('erp_mdt:getAllBolos')
-AddEventHandler('erp_mdt:getAllBolos', function()
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-            exports.oxmysql:execute("SELECT * FROM `pd_bolos`", {}, function(matches)
-                TriggerClientEvent('erp_mdt:getAllBolos', xPlayer.source, matches)
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-            exports.oxmysql:execute("SELECT * FROM `ems_icu`", {}, function(matches)
-                TriggerClientEvent('erp_mdt:getAllBolos', xPlayer.source, matches)
-            end)
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:searchBolos')
-AddEventHandler('erp_mdt:searchBolos', function(sentSearch)
-    if sentSearch then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                exports.oxmysql:execute(
-                    "SELECT * FROM `pd_bolos` WHERE `id` LIKE @query OR LOWER(`title`) LIKE @query OR `plate` LIKE @query OR LOWER(`owner`) LIKE @query OR LOWER(`individual`) LIKE @query OR LOWER(`detail`) LIKE @query OR LOWER(`officersinvolved`) LIKE @query OR LOWER(`tags`) LIKE @query OR LOWER(`author`) LIKE @query",
-                    {
-                        ["@query"] = string.lower('%' .. sentSearch .. '%') -- % wildcard, needed to search for all alike results
-                    }, function(matches)
-                        TriggerClientEvent('erp_mdt:getBolos', xPlayer.source, matches)
-                    end)
-            elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-                exports.oxmysql:execute(
-                    "SELECT * FROM `ems_icu` WHERE `id` LIKE @query OR LOWER(`title`) LIKE @query OR `plate` LIKE @query OR LOWER(`owner`) LIKE @query OR LOWER(`individual`) LIKE @query OR LOWER(`detail`) LIKE @query OR LOWER(`officersinvolved`) LIKE @query OR LOWER(`tags`) LIKE @query OR LOWER(`author`) LIKE @query",
-                    {
-                        ["@query"] = string.lower('%' .. sentSearch .. '%') -- % wildcard, needed to search for all alike results
-                    }, function(matches)
-                        TriggerClientEvent('erp_mdt:getBolos', xPlayer.source, matches)
-                    end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:getBoloData')
-AddEventHandler('erp_mdt:getBoloData', function(sentId)
-    if sentId then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                exports.oxmysql:execute("SELECT * FROM `pd_bolos` WHERE `id` =  @id LIMIT 1", {
-                    ["@id"] = sentId
-                }, function(matches)
-                    local data = matches[1]
-                    data['tags'] = json.decode(data['tags'])
-                    data['officersinvolved'] = json.decode(data['officersinvolved'])
-                    data['gallery'] = json.decode(data['gallery'])
-                    TriggerClientEvent('erp_mdt:getBoloData', xPlayer.source, data)
-                end)
-
-            elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-                exports.oxmysql:execute("SELECT * FROM `ems_icu` WHERE `id` =  @id LIMIT 1", {
-                    ["@id"] = sentId
-                }, function(matches)
-                    local data = matches[1]
-                    data['tags'] = json.decode(data['tags'])
-                    data['officersinvolved'] = json.decode(data['officersinvolved'])
-                    data['gallery'] = json.decode(data['gallery'])
-                    TriggerClientEvent('erp_mdt:getBoloData', xPlayer.source, data)
-                end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:newBolo')
-AddEventHandler('erp_mdt:newBolo',
-    function(existing, id, title, plate, owner, individual, detail, tags, gallery, officersinvolved, time)
-        if id then
-            local xPlayer = ESX.GetPlayerFromId(source)
-            if xPlayer then
-                if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-
-                    local function InsertBolo()
-                        exports.oxmysql:insert(
-                            'INSERT INTO `pd_bolos` (`title`, `author`, `plate`, `owner`, `individual`, `detail`, `tags`, `gallery`, `officersinvolved`, `time`) VALUES (@title, @author, @plate, @owner, @individual, @detail, @tags, @gallery, @officersinvolved, @time)',
-                            {
-                                ["@title"] = title,
-                                ["@author"] = xPlayer.name,
-                                ["@plate"] = plate,
-                                ["@owner"] = owner,
-                                ["@individual"] = individual,
-                                ["@detail"] = detail,
-                                ["@tags"] = json.encode(tags),
-                                ["@gallery"] = json.encode(gallery),
-                                ["@officersinvolved"] = json.encode(officersinvolved),
-                                ["@time"] = tostring(time)
-                            }, function(r)
-                                if r then
-                                    TriggerClientEvent('erp_mdt:boloComplete', xPlayer.source, r)
-                                    TriggerEvent('erp_mdt:AddLog', "A new BOLO was created by " .. xPlayer.name ..
-                                        " with the title (" .. title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    local function UpdateBolo()
-                        exports.oxmysql:update(
-                            "UPDATE pd_bolos SET `title`=:title, plate=:plate, owner=:owner, individual=:individual, detail=:detail, tags=:tags, gallery=:gallery, officersinvolved=:officersinvolved WHERE `id`= @id LIMIT 1",
-                            {
-                                ["@title"] = title,
-                                ["@plate"] = plate,
-                                ["@owner"] = owner,
-                                ["@individual"] = individual,
-                                ["@detail"] = detail,
-                                ["@tags"] = json.encode(tags),
-                                ["@gallery"] = json.encode(gallery),
-                                ["@officersinvolved"] = json.encode(officersinvolved),
-                                ["@id"] = id
-                            }, function(r)
-                                if r then
-                                    TriggerClientEvent('erp_mdt:boloComplete', xPlayer.source, id)
-                                    TriggerEvent('erp_mdt:AddLog', "A BOLO was updated by " .. xPlayer.name ..
-                                        " with the title (" .. title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    if existing then
-                        UpdateBolo()
-                    elseif not existing then
-                        InsertBolo()
-                    end
-                elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-
-                    local function InsertBolo()
-                        exports.oxmysql:insert(
-                            'INSERT INTO `ems_icu` (`title`, `author`, `plate`, `owner`, `individual`, `detail`, `tags`, `gallery`, `officersinvolved`, `time`) VALUES (:title, :author, :plate, :owner, :individual, :detail, :tags, :gallery, :officersinvolved, :time)',
-                            {
-                                title = title,
-                                author = xPlayer.name,
-                                plate = plate,
-                                owner = owner,
-                                individual = individual,
-                                detail = detail,
-                                tags = json.encode(tags),
-                                gallery = json.encode(gallery),
-                                officersinvolved = json.encode(officersinvolved),
-                                time = tostring(time)
-                            }, function(r)
-                                if r then
-                                    TriggerClientEvent('erp_mdt:boloComplete', xPlayer.source, r)
-                                    TriggerEvent('erp_mdt:AddLog',
-                                        "A new ICU Check-in was created by " .. xPlayer.name .. " with the title (" ..
-                                            title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    local function UpdateBolo()
-                        exports.oxmysql:update(
-                            "UPDATE `ems_icu` SET `title`=:title, plate=:plate, owner=:owner, individual=:individual, detail=:detail, tags=:tags, gallery=:gallery, officersinvolved=:officersinvolved WHERE `id`= @id LIMIT 1",
-                            {
-                                title = title,
-                                plate = plate,
-                                owner = owner,
-                                individual = individual,
-                                detail = detail,
-                                tags = json.encode(tags),
-                                gallery = json.encode(gallery),
-                                officersinvolved = json.encode(officersinvolved),
-                                id = id
-                            }, function(affectedRows)
-                                if affectedRows > 0 then
-                                    TriggerClientEvent('erp_mdt:boloComplete', xPlayer.source, id)
-                                    TriggerEvent('erp_mdt:AddLog',
-                                        "A ICU Check-in was updated by " .. xPlayer.name .. " with the title (" ..
-                                            title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    if existing then
-                        UpdateBolo()
-                    elseif not existing then
-                        InsertBolo()
-                    end
-                end
-            end
-        end
-    end)
-
-RegisterNetEvent('erp_mdt:deleteBolo')
-AddEventHandler('erp_mdt:deleteBolo', function(id)
-    if id then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                exports.oxmysql:executeSync("DELETE FROM `pd_bolos` WHERE id= @id", {
-                    id = id
-                })
-                TriggerEvent('erp_mdt:AddLog',
-                    "A BOLO was deleted by " .. xPlayer.name .. " with the ID (" .. id .. ")")
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:deleteICU')
-AddEventHandler('erp_mdt:deleteICU', function(id)
-    if id then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'ambulance') then
-                exports.oxmysql:executeSync("DELETE FROM `ems_icu` WHERE id= @id", {
-                    id = id
-                })
-                TriggerEvent('erp_mdt:AddLog',
-                    "A ICU Check-in was deleted by " .. xPlayer.name .. " with the ID (" .. id .. ")")
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:incidentSearchPerson')
-AddEventHandler('erp_mdt:incidentSearchPerson', function(name)
-    if name then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-
-                local function PpPpPpic(sex, profilepic)
-                    if profilepic then
-                        return profilepic
-                    end
-                    if sex == "f" then
-                        return "img/female.png"
-                    end
-                    return "img/male.png"
-                end
-
-                exports.oxmysql:execute(
-                    "SELECT id, identifier, firstname, lastname, profilepic, sex FROM `users` WHERE LOWER(`firstname`) LIKE @query OR LOWER(`lastname`) LIKE @query OR LOWER(`identifier`) LIKE @query OR CONCAT(LOWER(`firstname`), ' ', LOWER(`lastname`)) LIKE @query LIMIT 30",
-                    {
-                        ["@query"] = string.lower('%' .. name .. '%') -- % wildcard, needed to search for all alike results
-                    }, function(data)
-                        for i = 1, #data do
-                            data[i]['profilepic'] = PpPpPpic(data[i]['sex'], data[i]['profilepic'])
-                        end
-                        TriggerClientEvent('erp_mdt:incidentSearchPerson', xPlayer.source, data)
-                    end)
-            end
-        end
-    end
-end)
-
--- Reports
-
-RegisterNetEvent('erp_mdt:getAllReports')
-AddEventHandler('erp_mdt:getAllReports', function()
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police') then
-            exports.oxmysql:execute("SELECT * FROM `pd_reports` ORDER BY `id` DESC LIMIT 30", {}, function(matches)
-                TriggerClientEvent('erp_mdt:getAllReports', xPlayer.source, matches)
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-            exports.oxmysql:execute("SELECT * FROM `ems_reports` ORDER BY `id` DESC LIMIT 30", {}, function(matches)
-                TriggerClientEvent('erp_mdt:getAllReports', xPlayer.source, matches)
-            end)
-        elseif xPlayer.job and (xPlayer.job.name == 'doj') then
-            exports.oxmysql:execute("SELECT * FROM `doj_reports` ORDER BY `id` DESC LIMIT 30", {}, function(matches)
-                TriggerClientEvent('erp_mdt:getAllReports', xPlayer.source, matches)
-            end)
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:getReportData')
-AddEventHandler('erp_mdt:getReportData', function(sentId)
-    if sentId then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and xPlayer.job.name == 'police' then
-                exports.oxmysql:execute("SELECT * FROM `pd_reports` WHERE `id` =  @id LIMIT 1", {
-                    id = sentId
-                }, function(matches)
-                    local data = matches[1]
-                    data['tags'] = json.decode(data['tags'])
-                    data['officersinvolved'] = json.decode(data['officersinvolved'])
-                    data['civsinvolved'] = json.decode(data['civsinvolved'])
-                    data['gallery'] = json.decode(data['gallery'])
-                    TriggerClientEvent('erp_mdt:getReportData', xPlayer.source, data)
-                end)
-            elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-                exports.oxmysql:execute("SELECT * FROM `ems_reports` WHERE `id` =  @id LIMIT 1", {
-                    id = sentId
-                }, function(matches)
-                    local data = matches[1]
-                    data['tags'] = json.decode(data['tags'])
-                    data['officersinvolved'] = json.decode(data['officersinvolved'])
-                    data['civsinvolved'] = json.decode(data['civsinvolved'])
-                    data['gallery'] = json.decode(data['gallery'])
-                    TriggerClientEvent('erp_mdt:getReportData', xPlayer.source, data)
-                end)
-            elseif xPlayer.job and (xPlayer.job.name == 'doj') then
-                exports.oxmysql:execute("SELECT * FROM `doj_reports` WHERE `id` =  @id LIMIT 1", {
-                    id = sentId
-                }, function(matches)
-                    local data = matches[1]
-                    data['tags'] = json.decode(data['tags'])
-                    data['officersinvolved'] = json.decode(data['officersinvolved'])
-                    data['civsinvolved'] = json.decode(data['civsinvolved'])
-                    data['gallery'] = json.decode(data['gallery'])
-                    TriggerClientEvent('erp_mdt:getReportData', xPlayer.source, data)
-                end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:searchReports')
-AddEventHandler('erp_mdt:searchReports', function(sentSearch)
-    if sentSearch then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and xPlayer.job.name == 'police' then
-                exports.oxmysql:execute(
-                    "SELECT * FROM `pd_reports` WHERE `id` LIKE :query OR LOWER(`author`) LIKE :query OR LOWER(`title`) LIKE :query OR LOWER(`type`) LIKE :query OR LOWER(`detail`) LIKE :query OR LOWER(`tags`) LIKE :query ORDER BY `id` DESC LIMIT 50",
-                    {
-                        query = string.lower('%' .. sentSearch .. '%') -- % wildcard, needed to search for all alike results
-                    }, function(matches)
-                        TriggerClientEvent('erp_mdt:getAllReports', xPlayer.source, matches)
-                    end)
-            elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-                exports.oxmysql:execute(
-                    "SELECT * FROM `ems_reports` WHERE `id` LIKE :query OR LOWER(`author`) LIKE :query OR LOWER(`title`) LIKE :query OR LOWER(`type`) LIKE :query OR LOWER(`detail`) LIKE :query OR LOWER(`tags`) LIKE :query ORDER BY `id` DESC LIMIT 50",
-                    {
-                        query = string.lower('%' .. sentSearch .. '%') -- % wildcard, needed to search for all alike results
-                    }, function(matches)
-                        TriggerClientEvent('erp_mdt:getAllReports', xPlayer.source, matches)
-                    end)
-            elseif xPlayer.job and (xPlayer.job.name == 'doj') then
-                exports.oxmysql:execute(
-                    "SELECT * FROM `doj_reports` WHERE `id` LIKE :query OR LOWER(`author`) LIKE :query OR LOWER(`title`) LIKE :query OR LOWER(`type`) LIKE :query OR LOWER(`detail`) LIKE :query OR LOWER(`tags`) LIKE :query ORDER BY `id` DESC LIMIT 50",
-                    {
-                        query = string.lower('%' .. sentSearch .. '%') -- % wildcard, needed to search for all alike results
-                    }, function(matches)
-                        TriggerClientEvent('erp_mdt:getAllReports', xPlayer.source, matches)
-                    end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:newReport')
-AddEventHandler('erp_mdt:newReport',
-    function(existing, id, title, reporttype, detail, tags, gallery, officers, civilians, time)
-        if id then
-            local xPlayer = ESX.GetPlayerFromId(source)
-            if xPlayer then
-                if xPlayer.job and xPlayer.job.name == 'police' then
-
-                    local function InsertBolo()
-                        exports.oxmysql:insert(
-                            'INSERT INTO `pd_reports` (`title`, `author`, `type`, `detail`, `tags`, `gallery`, `officersinvolved`, `civsinvolved`, `time`) VALUES (:title, :author, :type, :detail, :tags, :gallery, :officersinvolved, :civsinvolved, :time)',
-                            {
-                                title = title,
-                                author = xPlayer.name,
-                                type = reporttype,
-                                detail = detail,
-                                tags = json.encode(tags),
-                                gallery = json.encode(gallery),
-                                officersinvolved = json.encode(officers),
-                                civsinvolved = json.encode(civilians),
-                                time = tostring(time)
-                            }, function(r)
-                                if r then
-                                    TriggerClientEvent('erp_mdt:reportComplete', xPlayer.source, r)
-                                    TriggerEvent('erp_mdt:AddLog', "A new report was created by " .. xPlayer.name ..
-                                        " with the title (" .. title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    local function UpdateBolo()
-                        exports.oxmysql:update(
-                            "UPDATE `pd_reports` SET `title`=:title, type=:type, detail=:detail, tags=:tags, gallery=:gallery, officersinvolved=:officersinvolved, civsinvolved=:civsinvolved WHERE `id`= @id LIMIT 1",
-                            {
-                                title = title,
-                                type = reporttype,
-                                detail = detail,
-                                tags = json.encode(tags),
-                                gallery = json.encode(gallery),
-                                officersinvolved = json.encode(officers),
-                                civsinvolved = json.encode(civilians),
-                                id = id
-                            }, function(affectedRows)
-                                if affectedRows > 0 then
-                                    TriggerClientEvent('erp_mdt:reportComplete', xPlayer.source, id)
-                                    TriggerEvent('erp_mdt:AddLog', "A report was updated by " .. xPlayer.name ..
-                                        " with the title (" .. title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    if existing then
-                        UpdateBolo()
-                    elseif not existing then
-                        InsertBolo()
-                    end
-                elseif xPlayer.job and (xPlayer.job.name == 'ambulance') then
-
-                    local function InsertBolo()
-                        exports.oxmysql:insert(
-                            'INSERT INTO `ems_reports` (`title`, `author`, `type`, `detail`, `tags`, `gallery`, `officersinvolved`, `civsinvolved`, `time`) VALUES (:title, :author, :type, :detail, :tags, :gallery, :officersinvolved, :civsinvolved, :time)',
-                            {
-                                title = title,
-                                author = xPlayer.name,
-                                type = reporttype,
-                                detail = detail,
-                                tags = json.encode(tags),
-                                gallery = json.encode(gallery),
-                                officersinvolved = json.encode(officers),
-                                civsinvolved = json.encode(civilians),
-                                time = tostring(time)
-                            }, function(r)
-                                if r > 0 then
-                                    TriggerClientEvent('erp_mdt:reportComplete', xPlayer.source, r)
-                                    TriggerEvent('erp_mdt:AddLog', "A new report was created by " .. xPlayer.name ..
-                                        " with the title (" .. title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    local function UpdateBolo()
-                        exports.oxmysql:update(
-                            "UPDATE `ems_reports` SET `title`=:title, type=:type, detail=:detail, tags=:tags, gallery=:gallery, officersinvolved=:officersinvolved, civsinvolved=:civsinvolved WHERE `id`= @id LIMIT 1",
-                            {
-                                title = title,
-                                type = reporttype,
-                                detail = detail,
-                                tags = json.encode(tags),
-                                gallery = json.encode(gallery),
-                                officersinvolved = json.encode(officers),
-                                civsinvolved = json.encode(civilians),
-                                id = id
-                            }, function(r)
-                                if r > 0 then
-                                    TriggerClientEvent('erp_mdt:reportComplete', xPlayer.source, id)
-                                    TriggerEvent('erp_mdt:AddLog', "A report was updated by " .. xPlayer.name ..
-                                        " with the title (" .. title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    if existing then
-                        UpdateBolo()
-                    elseif not existing then
-                        InsertBolo()
-                    end
-                elseif xPlayer.job and (xPlayer.job.name == 'doj') then
-
-                    local function InsertBolo()
-                        exports.oxmysql:insert(
-                            'INSERT INTO `doj_reports` (`title`, `author`, `type`, `detail`, `tags`, `gallery`, `officersinvolved`, `civsinvolved`, `time`) VALUES (:title, :author, :type, :detail, :tags, :gallery, :officersinvolved, :civsinvolved, :time)',
-                            {
-                                title = title,
-                                author = xPlayer.name,
-                                type = reporttype,
-                                detail = detail,
-                                tags = json.encode(tags),
-                                gallery = json.encode(gallery),
-                                officersinvolved = json.encode(officers),
-                                civsinvolved = json.encode(civilians),
-                                time = tostring(time)
-                            }, function(r)
-                                if r > 0 then
-                                    TriggerClientEvent('erp_mdt:reportComplete', xPlayer.source, r)
-                                    TriggerEvent('erp_mdt:AddLog', "A new report was created by " .. xPlayer.name ..
-                                        " with the title (" .. title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    local function UpdateBolo()
-                        exports.oxmysql:update(
-                            "UPDATE `doj_reports` SET `title`=:title, type=:type, detail=:detail, tags=:tags, gallery=:gallery, officersinvolved=:officersinvolved, civsinvolved=:civsinvolved WHERE `id`= @id LIMIT 1",
-                            {
-                                title = title,
-                                type = reporttype,
-                                detail = detail,
-                                tags = json.encode(tags),
-                                gallery = json.encode(gallery),
-                                officersinvolved = json.encode(officers),
-                                civsinvolved = json.encode(civilians),
-                                id = id
-                            }, function(r)
-                                if r > 0 then
-                                    TriggerClientEvent('erp_mdt:reportComplete', xPlayer.source, id)
-                                    TriggerEvent('erp_mdt:AddLog', "A report was updated by " .. xPlayer.name ..
-                                        " with the title (" .. title .. ") and ID (" .. id .. ")")
-                                end
-                            end)
-                    end
-
-                    if existing then
-                        UpdateBolo()
-                    elseif not existing then
-                        InsertBolo()
-                    end
-                end
-            end
-        end
-    end)
-
--- DMV
-
-local function GetImpoundStatus(vehicleid, cb)
-    cb(#(exports.oxmysql:executeSync('SELECT id FROM `impound` WHERE `vehicleid` = @vehicleid', {['@vehicleid'] = vehicleid})) > 0)
-end
-
-local function GetBoloStatus(plate, cb)
-    cb(exports.oxmysql:executeSync('SELECT id FROM `pd_bolos` WHERE LOWER (`plate`) = @plate', {
-        ["@plate"] = string.lower(plate)
-    }))
-end
-
-local function GetOwnerName(cid, cb)
-    cb(exports.oxmysql:executeSync('SELECT firstname, lastname FROM `users` WHERE identifier = @cid LIMIT 1', {
-        ["@cid"] = cid
-    }))
-end
-
-local function GetVehicleInformation(plate, cb)
-    cb(exports.oxmysql:executeSync('SELECT id, information FROM `pd_vehicleinfo` WHERE plate = @plate', {
-        ["@plate"] = plate
-    }))
-end
-
-RegisterNetEvent('erp_mdt:searchVehicles')
-AddEventHandler('erp_mdt:searchVehicles', function(search, hash)
-    if search then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                exports.oxmysql:execute(
-                    "SELECT owner, plate, vehicle, code, stolen, image FROM `owned_vehicles` WHERE LOWER(`plate`) LIKE @query OR LOWER(`vehicle`) LIKE @hash LIMIT 25",
-                    {
-                        ["@query"] = string.lower('%' .. search .. '%'),
-                        ["@hash"] = string.lower('%' .. hash .. '%')
-                    }, function(vehicles)
-                        for i = 1, #vehicles do
-
-                            -- Impound Status
-                            -- GetImpoundStatus(vehicles[i]['plate'], function(impoundStatus)
-                                -- vehicles[i]['impound'] = impoundStatus
-                            -- end)
-                            vehicles[i]['impound'] = false
-                            vehicles[i]['bolo'] = false
-
-                            if tonumber(vehicles[i]['code']) == 5 then
-                                vehicles[i]['code'] = true
-                            else
-                                vehicles[i]['code'] = false
-                            end
-
-                            -- Bolo Status
-                            GetBoloStatus(vehicles[i]['plate'], function(boloStatus)
-                                if boloStatus and boloStatus[1] then
-                                    vehicles[i]['bolo'] = true
-                                end
-                            end)
-
-                            GetOwnerName(vehicles[i]['owner'], function(name)
-                                if name and name[1] then
-                                    vehicles[i]['owner'] = name[1]['firstname'] .. ' ' .. name[1]['lastname']
-                                end
-                            end)
-
-                            -- if vehicles[i]['image'] == nil then
-                                -- vehicles[i]['image'] = "img/not-found.jpg"
-                            -- end
-
-                        end
-
-                        TriggerClientEvent('erp_mdt:searchVehicles', xPlayer.source, vehicles)
-                    end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:getVehicleData')
-AddEventHandler('erp_mdt:getVehicleData', function(plate)
-    if plate then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                exports.oxmysql:execute(
-                    "SELECT owner, plate, vehicle, code, stolen, image FROM `owned_vehicles` WHERE plate = @plate LIMIT 1",
-                    {
-                        ["@plate"] = string.gsub(plate, "^%s*(.-)%s*$", "%1")
-                    }, function(vehicle)
-                        if vehicle and vehicle[1] then
-						    local vehData = json.decode(vehicle[1].vehicle)
-							--print(vehData.model)
-                            vehicle[1]['impound'] = false
-                            -- GetImpoundStatus(vehicle[1]['plate'], function(impoundStatus)
-                                -- vehicle[1]['impound'] = impoundStatus
-                            -- end)
-
-                            vehicle[1]['bolo'] = false
-                            vehicle[1]['information'] = ""
-
-                            if tonumber(vehicle[1]['code']) == 5 then
-                                vehicle[1]['code'] = true
-                            else
-                                vehicle[1]['code'] = false
-                            end -- Used to get the code 5 status
-
-                            -- Bolo Status
-                            GetBoloStatus(vehicle[1]['plate'], function(boloStatus)
-                                if boloStatus and boloStatus[1] then
-                                    vehicle[1]['bolo'] = true
-                                end
-                            end) -- Used to get BOLO status.
-
-                            vehicle[1]['name'] = "Unknown Person"
-
-                            GetOwnerName(vehicle[1]['owner'], function(name)
-                                if name and name[1] then
-                                    vehicle[1]['name'] = name[1]['firstname'] .. ' ' .. name[1]['lastname']
-                                end
-                            end) -- Get's vehicle owner name name.
-
-                            vehicle[1]['dbid'] = 0
-
-                            GetVehicleInformation(vehicle[1]['plate'], function(info)
-                                if info and info[1] then
-                                    vehicle[1]['information'] = info[1]['information']
-                                    vehicle[1]['dbid'] = info[1]['plate']
-                                end
-                            end) -- Vehicle notes and database ID if there is one.
-                            --print(GetLabelText(GetDisplayNameFromVehicleModel(vehData.model)))
-                            -- if vehicle[1]['image'] == nil then
-                                -- vehicle[1]['image'] = "img/" .. GetLabelText(GetDisplayNameFromVehicleModel(vehData.model)) .. ".jpg"
-                            -- end -- Image
-                        end
-                        TriggerClientEvent('erp_mdt:getVehicleData', xPlayer.source, vehicle)
-                    end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:saveVehicleInfo')
-AddEventHandler('erp_mdt:saveVehicleInfo', function(dbid, plate, imageurl, notes)
-    if plate then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                if dbid == nil then
-                    dbid = 0
-                end
-                exports.oxmysql:executeSync("UPDATE owned_vehicles SET `image` = @image WHERE `plate` = @plate LIMIT 1", {
-                    ["@plate"] = string.gsub(plate, "^%s*(.-)%s*$", "%1"),
-                    ["@image"] = imageurl
-                })
-                TriggerEvent('erp_mdt:AddLog', "A vehicle with the plate (" .. plate .. ") has a new image (" ..
-                    imageurl .. ") edited by " .. xPlayer.name)
-                if tonumber(dbid) == 0 then
-                    exports.oxmysql:insert(
-                        'INSERT INTO `pd_vehicleinfo` (`plate`, `information`) VALUES (@plate, @information)', {
-                            ["@plate"] = string.gsub(plate, "^%s*(.-)%s*$", "%1"),
-                            ["@information"] = notes
-                        }, function(infoResult)
-                            if infoResult then
-                                TriggerClientEvent('erp_mdt:updateVehicleDbId', xPlayer.source, infoResult)
-                                TriggerEvent('erp_mdt:AddLog', "A vehicle with the plate (" .. plate ..
-                                    ") was added to the vehicle information database by " .. xPlayer.name)
-                            end
-                        end)
-                elseif tonumber(dbid) > 0 then
-                    exports.oxmysql:executeSync(
-                        "UPDATE pd_vehicleinfo SET `information` = @information WHERE `plate` = @plate LIMIT 1", {
-                            ["@plate"] = string.gsub(plate, "^%s*(.-)%s*$", "%1"),
-                            ["@information"] = notes
-                        })
-                end
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:knownInformation')
-AddEventHandler('erp_mdt:knownInformation', function(dbid, type, status, plate)
-    if plate then
-        local xPlayer = ESX.GetPlayerFromId(source)
-        if xPlayer then
-            if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'sheriff' or xPlayer.job.name == 'ambulance')) then
-
-                if dbid == nil then
-                    dbid = 0
-                end
-
-                if type == 'code5' and status == true then
-                    exports.oxmysql:executeSync("UPDATE owned_vehicles SET `code `= @code WHERE `plate` = @plate LIMIT 1", {
-                        ["@plate"] = string.gsub(plate, "^%s*(.-)%s*$", "%1"),
-                        ["@code"] = 5
-                    })
-                    TriggerEvent('erp_mdt:AddLog', "A vehicle with the plate (" .. plate .. ") was set to CODE 5 by " ..
-                        xPlayer.name)
-                elseif type == 'code5' and not status then
-                    exports.oxmysql:executeSync("UPDATE owned_vehicles SET `code` = @code WHERE `plate` = @plate LIMIT 1", {
-                       ["@plate"] = string.gsub(plate, "^%s*(.-)%s*$", "%1"),
-                       ["@code"] = 0
-                    })
-                    TriggerEvent('erp_mdt:AddLog', "A vehicle with the plate (" .. plate ..
-                        ") had it's CODE 5 status removed by " .. xPlayer.name)
-                elseif type == 'stolen' and status then
-                    exports.oxmysql:executeSync(
-                        "UPDATE owned_vehicles SET `stolen`= @stolen WHERE `plate` = @plate LIMIT 1", {
-                            ["@plate"] = string.gsub(plate, "^%s*(.-)%s*$", "%1"),
-                            ["@stolen"] = 1
-                        })
-                    TriggerEvent('erp_mdt:AddLog', "A vehicle with the plate (" .. plate .. ") was set to STOLEN by " ..
-                        xPlayer.name)
-                elseif type == 'stolen' and not status then
-                    exports.oxmysql:executeSync(
-                        "UPDATE owned_vehicles SET `stolen` = @stolen WHERE `plate` = @plate LIMIT 1", {
-                            ["@plate"] = string.gsub(plate, "^%s*(.-)%s*$", "%1"),
-                            ["@stolen"] = 0
-                        })
-                    TriggerEvent('erp_mdt:AddLog', "A vehicle with the plate (" .. plate ..
-                        ") had it's STOLEN status removed by " .. xPlayer.name)
-                end
-
-                if tonumber(dbid) == 0 then
-                    exports.oxmysql:insert('INSERT INTO `pd_vehicleinfo` (`plate`) VALUES (@plate)', {
-                        ["@plate"] = string.gsub(plate, "^%s*(.-)%s*$", "%1")
-                    }, function(infoResult)
-                        if infoResult then
-                            TriggerClientEvent('erp_mdt:updateVehicleDbId', xPlayer.source, infoResult)
-                            TriggerEvent('erp_mdt:AddLog', "A vehicle with the plate (" .. plate ..
-                                ") was added to the vehicle information database by " .. xPlayer.name)
-                        end
-                    end)
-                end
-            end
-        end
-    end
-end)
-
-local LogPerms = {
-    ['ambulance'] = {
-	    [3] = true,
-        [7] = true,
-        [8] = true,
-        [15] = true,
-        [16] = true
-    },
-    ['bcso'] = {
-        [6] = true,
-        [7] = true,
-        [8] = true
-    },
-    ['doc'] = {
-        [8] = true,
-        [9] = true
-    },
-    ['doj'] = {
-        [11] = true
-    },
-    ['police'] = {
-        [6] = true,
-        [7] = true,
-        [8] = true
-    },
-    ['sast'] = {
-        [5] = true,
-        [6] = true
-    },
-    ['sapr'] = {
-        [4] = true,
-        [5] = true
+    lib.logger(xPlayer.identifier, 'mdt', ('Hráč: **%s/%s %s** \nnapsal správu: **%s**'):format(GetPlayerName(src), name, GetCallsign(char), message))
+    MysqlConverter(Config.Mysql, 'execute',
+        'INSERT INTO mdw_messages (name, message, time, profilepic, job) VALUES(@name, @message, @time, @pic, @job)',
+        {
+            ["@name"] = name,
+            ["@message"] = message,
+            ["@time"] = time,
+            ["@pic"] = pic,
+            ["@job"] = 'police'
+        })
+    local lastMsg = {
+        name = name,
+        message = message,
+        time = time,
+        profilepic = pic,
+        job = 'police'
     }
-}
-
-RegisterNetEvent('erp_mdt:getAllLogs')
-AddEventHandler('erp_mdt:getAllLogs', function()
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if LogPerms[xPlayer.job.name][xPlayer.job.grade] then
-            exports.oxmysql:execute('SELECT * FROM pd_logs ORDER BY `id` DESC LIMIT 250', {}, function(infoResult)
-                TriggerLatentClientEvent('erp_mdt:getAllLogs', xPlayer.source, 30000, infoResult)
-            end)
-        end
-    end
+    TriggerClientEvent("rx_mdt:dashboardMessage", -1, lastMsg)
 end)
 
--- Penal Code
+RegisterServerEvent("rx_mdt:refreshDispatchMsgs")
+AddEventHandler("rx_mdt:refreshDispatchMsgs", function()
+    local src = source
+    local result = MysqlConverter(Config.Mysql, 'fetchAll', 'SELECT * FROM mdw_messages LIMIT 200', {})
+    TriggerClientEvent("rx_mdt:dashboardMessages", src, result)
+end)
 
-local PenalCodeTitles = {
-    [1] = 'OFFENSES AGAINST PERSONS',
-    [2] = 'OFFENSES INVOLVING THEFT',
-    [3] = 'OFFENSES INVOLVING FRAUD',
-    [4] = 'OFFENSES INVOLVING DAMAGE TO PROPERTY',
-    [5] = 'OFFENSES AGAINST PUBLIC ADMINISTRATION',
-    [6] = 'OFFENSES AGAINST PUBLIC ORDER',
-    [7] = 'OFFENSES AGAINST HEALTH AND MORALS',
-    [8] = 'OFFENSES AGAINST PUBLIC SAFETY',
-    [9] = 'OFFENSES INVOLVING THE OPERATION OF A VEHICLE',
-    [10] = 'OFFENSES INVOLVING THE WELL-BEING OF WILDLIFE'
-}
+-- RegisterNetEvent('rx_mdt:dashboardMessage')
+-- AddEventHandler('rx_mdt:dashboardMessage', function(sentData)
+--     local job = exports["isPed"]:isChar("myjob")
+--     if job == xPlayer.job.name or job.name == 'ambulance' then
+--         SendNUIMessage({ type = "dispatchmessage", data = sentData })
+--     end
+-- end)
 
-local PenalCode = {
-    [1] = {
-        [1] = {
-            title = 'Simple Assault',
-            class = 'Misdemeanor',
-            id = 'P.C. 1001',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Assault',
-            class = 'Misdemeanor',
-            id = 'P.C. 1002',
-            months = 15,
-            fine = 850,
-            color = 'orange'
-        },
-        [3] = {
-            title = 'Aggravated Assault',
-            class = 'Felony',
-            id = 'P.C. 1003',
-            months = 20,
-            fine = 1250,
-            color = 'orange'
-        },
-        [4] = {
-            title = 'Assault with a Deadly Weapon',
-            class = 'Felony',
-            id = 'P.C. 1004',
-            months = 30,
-            fine = 3750,
-            color = 'red'
-        },
-        [5] = {
-            title = 'Involuntary Manslaughter',
-            class = 'Felony',
-            id = 'P.C. 1005',
-            months = 60,
-            fine = 7500,
-            color = 'red'
-        },
-        [6] = {
-            title = 'Vehicular Manslaughter',
-            class = 'Felony',
-            id = 'P.C. 1006',
-            months = 75,
-            fine = 7500,
-            color = 'red'
-        },
-        [7] = {
-            title = 'Attempted Murder of a Civilian',
-            class = 'Felony',
-            id = 'P.C. 1007',
-            months = 50,
-            fine = 7500,
-            color = 'red'
-        },
-        [8] = {
-            title = 'Second Degree Murder',
-            class = 'Felony',
-            id = 'P.C. 1008',
-            months = 100,
-            fine = 15000,
-            color = 'red'
-        },
-        [9] = {
-            title = 'Accessory to Second Degree Murder',
-            class = 'Felony',
-            id = 'P.C. 1009',
-            months = 50,
-            fine = 5000,
-            color = 'red'
-        },
-        [10] = {
-            title = 'First Degree Murder',
-            class = 'Felony',
-            id = 'P.C. 1010',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        },
-        [11] = {
-            title = 'Accessory to First Degree Murder',
-            class = 'Felony',
-            id = 'P.C. 1011',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        },
-        [12] = {
-            title = 'Murder of a Public Servant or Peace Officer',
-            class = 'Felony',
-            id = 'P.C. 1012',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        },
-        [13] = {
-            title = 'Attempted Murder of a Public Servant or Peace Officer',
-            class = 'Felony',
-            id = 'P.C. 1013',
-            months = 65,
-            fine = 10000,
-            color = 'red'
-        },
-        [14] = {
-            title = 'Accessory to the Murder of a Public Servant or Peace Officer',
-            class = 'Felony',
-            id = 'P.C. 1014',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        },
-        [15] = {
-            title = 'Unlawful Imprisonment',
-            class = 'Misdemeanor',
-            id = 'P.C. 1015',
-            months = 10,
-            fine = 600,
-            color = 'green'
-        },
-        [16] = {
-            title = 'Kidnapping',
-            class = 'Felony',
-            id = 'P.C. 1016',
-            months = 15,
-            fine = 900,
-            color = 'orange'
-        },
-        [17] = {
-            title = 'Accessory to Kidnapping',
-            class = 'Felony',
-            id = 'P.C. 1017',
-            months = 7,
-            fine = 450,
-            color = 'orange'
-        },
-        [18] = {
-            title = 'Attempted Kidnapping',
-            class = 'Felony',
-            id = 'P.C. 1018',
-            months = 10,
-            fine = 450,
-            color = 'orange'
-        },
-        [19] = {
-            title = 'Hostage Taking',
-            class = 'Felony',
-            id = 'P.C. 1019',
-            months = 20,
-            fine = 1200,
-            color = 'orange'
-        },
-        [20] = {
-            title = 'Accessory to Hostage Taking',
-            class = 'Felony',
-            id = 'P.C. 1020',
-            months = 10,
-            fine = 600,
-            color = 'orange'
-        },
-        [21] = {
-            title = 'Unlawful Imprisonment of a Public Servant or Peace Officer.',
-            class = 'Felony',
-            id = 'P.C. 1021',
-            months = 25,
-            fine = 4000,
-            color = 'orange'
-        },
-        [22] = {
-            title = 'Criminal Threats',
-            class = 'Misdemeanor',
-            id = 'P.C. 1022',
-            months = 5,
-            fine = 500,
-            color = 'orange'
-        },
-        [23] = {
-            title = 'Reckless Endangerment',
-            class = 'Misdemeanor',
-            id = 'P.C. 1023',
-            months = 10,
-            fine = 1000,
-            color = 'orange'
-        },
-        [24] = {
-            title = 'Gang Related Shooting',
-            class = 'Felony',
-            id = 'P.C. 1024',
-            months = 30,
-            fine = 2500,
-            color = 'red'
-        },
-        [25] = {
-            title = 'Cannibalism',
-            class = 'Felony',
-            id = 'P.C. 1025',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        },
-        [26] = {
-            title = 'Torture',
-            class = 'Felony',
-            id = 'P.C. 1026',
-            months = 40,
-            fine = 4500,
-            color = 'red'
-        }
-    },
-    [2] = {
-        [1] = {
-            title = 'Petty Theft',
-            class = 'Infraction',
-            id = 'P.C. 2001',
-            months = 0,
-            fine = 250,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Grand Theft',
-            class = 'Misdemeanor',
-            id = 'P.C. 2002',
-            months = 10,
-            fine = 600,
-            color = 'green'
-        },
-        [3] = {
-            title = 'Grand Theft Auto A',
-            class = 'Felony',
-            id = 'P.C. 2003',
-            months = 15,
-            fine = 900,
-            color = 'green'
-        },
-        [4] = {
-            title = 'Grand Theft Auto B',
-            class = 'Felony',
-            id = 'P.C. 2004',
-            months = 35,
-            fine = 3500,
-            color = 'green'
-        },
-        [5] = {
-            title = 'Carjacking',
-            class = 'Felony',
-            id = 'P.C. 2005',
-            months = 30,
-            fine = 2000,
-            color = 'orange'
-        },
-        [6] = {
-            title = 'Burglary',
-            class = 'Misdemeanor',
-            id = 'P.C. 2006',
-            months = 10,
-            fine = 500,
-            color = 'green'
-        },
-        [7] = {
-            title = 'Robbery',
-            class = 'Felony',
-            id = 'P.C. 2007',
-            months = 25,
-            fine = 2000,
-            color = 'green'
-        },
-        [8] = {
-            title = 'Accessory to Robbery',
-            class = 'Felony',
-            id = 'P.C. 2008',
-            months = 12,
-            fine = 1000,
-            color = 'green'
-        },
-        [9] = {
-            title = 'Attempted Robbery',
-            class = 'Felony',
-            id = 'P.C. 2009',
-            months = 20,
-            fine = 1000,
-            color = 'green'
-        },
-        [10] = {
-            title = 'Armed Robbery',
-            class = 'Felony',
-            id = 'P.C. 2010',
-            months = 30,
-            fine = 3000,
-            color = 'orange'
-        },
-        [11] = {
-            title = 'Accessory to Armed Robbery',
-            class = 'Felony',
-            id = 'P.C. 2011',
-            months = 15,
-            fine = 1500,
-            color = 'orange'
-        },
-        [12] = {
-            title = 'Attempted Armed Robbery',
-            class = 'Felony',
-            id = 'P.C. 2012',
-            months = 25,
-            fine = 1500,
-            color = 'orange'
-        },
-        [13] = {
-            title = 'Grand Larceny',
-            class = 'Felony',
-            id = 'P.C. 2013',
-            months = 45,
-            fine = 7500,
-            color = 'orange'
-        },
-        [14] = {
-            title = 'Leaving Without Paying',
-            class = 'Infraction',
-            id = 'P.C. 2014',
-            months = 0,
-            fine = 500,
-            color = 'green'
-        },
-        [15] = {
-            title = 'Possession of Nonlegal Currency',
-            class = 'Misdemeanor',
-            id = 'P.C. 2015',
-            months = 10,
-            fine = 750,
-            color = 'green'
-        },
-        [16] = {
-            title = 'Possession of Government-Issued Items',
-            class = 'Misdemeanor',
-            id = 'P.C. 2016',
-            months = 15,
-            fine = 1000,
-            color = 'green'
-        },
-        [17] = {
-            title = 'Possession of Items Used in the Commission of a Crime',
-            class = 'Misdemeanor',
-            id = 'P.C. 2017',
-            months = 10,
-            fine = 500,
-            color = 'green'
-        },
-        [18] = {
-            title = 'Sale of Items Used in the Commission of a Crime',
-            class = 'Felony',
-            id = 'P.C. 2018',
-            months = 15,
-            fine = 1000,
-            color = 'orange'
-        },
-        [19] = {
-            title = 'Theft of an Aircraft',
-            class = 'Felony',
-            id = 'P.C. 2019',
-            months = 20,
-            fine = 1000,
-            color = 'green'
-        }
-    },
-    [3] = {
-        [1] = {
-            title = 'Impersonating',
-            class = 'Misdemeanor',
-            id = 'P.C. 3001',
-            months = 15,
-            fine = 1250,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Impersonating a Peace Officer or Public Servant',
-            class = 'Felony',
-            id = 'P.C. 3002',
-            months = 25,
-            fine = 2750,
-            color = 'green'
-        },
-        [3] = {
-            title = 'Impersonating a Judge',
-            class = 'Felony',
-            id = 'P.C. 3003',
-            months = 0,
-            fine = 0,
-            color = 'green'
-        },
-        [4] = {
-            title = 'Possession of Stolen Identification',
-            class = 'Misdemeanor',
-            id = 'P.C. 3004',
-            months = 10,
-            fine = 750,
-            color = 'green'
-        },
-        [5] = {
-            title = 'Possession of Stolen Government Identification',
-            class = 'Misdemeanor',
-            id = 'P.C. 3005',
-            months = 20,
-            fine = 2000,
-            color = 'green'
-        },
-        [6] = {
-            title = 'Extortion',
-            class = 'Felony',
-            id = 'P.C. 3006',
-            months = 20,
-            fine = 900,
-            color = 'orange'
-        },
-        [7] = {
-            title = 'Fraud',
-            class = 'Misdemeanor',
-            id = 'P.C. 3007',
-            months = 10,
-            fine = 450,
-            color = 'green'
-        },
-        [8] = {
-            title = 'Forgery',
-            class = 'Misdemeanor',
-            id = 'P.C. 3008',
-            months = 15,
-            fine = 750,
-            color = 'green'
-        },
-        [9] = {
-            title = 'Money Laundering',
-            class = 'Felony',
-            id = 'P.C. 3009',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        }
-    },
-    [4] = {
-        [1] = {
-            title = 'Trespassing',
-            class = 'Misdemeanor',
-            id = 'P.C. 4001',
-            months = 10,
-            fine = 450,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Felony Trespassing',
-            class = 'Felony',
-            id = 'P.C. 4002',
-            months = 15,
-            fine = 1500,
-            color = 'green'
-        },
-        [3] = {
-            title = 'Arson',
-            class = 'Felony',
-            id = 'P.C. 4003',
-            months = 15,
-            fine = 1500,
-            color = 'orange'
-        },
-        [4] = {
-            title = 'Vandalism',
-            class = 'Infraction',
-            id = 'P.C. 4004',
-            months = 0,
-            fine = 300,
-            color = 'green'
-        },
-        [5] = {
-            title = 'Vandalism of Government Property',
-            class = 'Felony',
-            id = 'P.C. 4005',
-            months = 20,
-            fine = 1500,
-            color = 'green'
-        },
-        [6] = {
-            title = 'Littering',
-            class = 'Infraction',
-            id = 'P.C. 4006',
-            months = 0,
-            fine = 200,
-            color = 'green'
-        }
-    },
-    [5] = {
-        [1] = {
-            title = 'Bribery of a Government Official',
-            class = 'Felony',
-            id = 'P.C. 5001',
-            months = 20,
-            fine = 3500,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Anti-Mask Law',
-            class = 'Infraction',
-            id = 'P.C. 5002',
-            months = 0,
-            fine = 750,
-            color = 'green'
-        },
-        [3] = {
-            title = 'Possession of Contraband in a Government Facility',
-            class = 'Felony',
-            id = 'P.C. 5003',
-            months = 25,
-            fine = 1000,
-            color = 'green'
-        },
-        [4] = {
-            title = 'Criminal Possession of Stolen Property',
-            class = 'Misdemeanor',
-            id = 'P.C. 5004',
-            months = 10,
-            fine = 500,
-            color = 'green'
-        },
-        [5] = {
-            title = 'Escaping',
-            class = 'Felony',
-            id = 'P.C. 5005',
-            months = 10,
-            fine = 450,
-            color = 'green'
-        },
-        [6] = {
-            title = 'Jailbreak',
-            class = 'Felony',
-            id = 'P.C. 5006',
-            months = 30,
-            fine = 2500,
-            color = 'orange'
-        },
-        [7] = {
-            title = 'Accessory to Jailbreak',
-            class = 'Felony',
-            id = 'P.C. 5007',
-            months = 25,
-            fine = 2000,
-            color = 'orange'
-        },
-        [8] = {
-            title = 'Attempted Jailbreak',
-            class = 'Felony',
-            id = 'P.C. 5008',
-            months = 20,
-            fine = 1500,
-            color = 'orange'
-        },
-        [9] = {
-            title = 'Perjury',
-            class = 'Felony',
-            id = 'P.C. 5009',
-            months = 0,
-            fine = 0,
-            color = 'green'
-        },
-        [10] = {
-            title = 'Violation of a Restraining Order',
-            class = 'Felony',
-            id = 'P.C. 5010',
-            months = 20,
-            fine = 2250,
-            color = 'green'
-        },
-        [11] = {
-            title = 'Embezzlement',
-            class = 'Felony',
-            id = 'P.C. 5011',
-            months = 45,
-            fine = 10000,
-            color = 'green'
-        },
-        [12] = {
-            title = 'Unlawful Practice',
-            class = 'Felony',
-            id = 'P.C. 5012',
-            months = 15,
-            fine = 1500,
-            color = 'orange'
-        },
-        [13] = {
-            title = 'Misuse of Emergency Systems',
-            class = 'Infraction',
-            id = 'P.C. 5013',
-            months = 0,
-            fine = 600,
-            color = 'orange'
-        },
-        [14] = {
-            title = 'Conspiracy',
-            class = 'Misdemeanor',
-            id = 'P.C. 5014',
-            months = 10,
-            fine = 450,
-            color = 'green'
-        },
-        [15] = {
-            title = 'Violating a Court Order',
-            class = 'Misdemeanor',
-            id = 'P.C. 5015',
-            months = 0,
-            fine = 0,
-            color = 'orange'
-        },
-        [16] = {
-            title = 'Failure to Appear',
-            class = 'Misdemeanor',
-            id = 'P.C. 5016',
-            months = 0,
-            fine = 0,
-            color = 'orange'
-        },
-        [17] = {
-            title = 'Contempt of Court',
-            class = 'Felony',
-            id = 'P.C. 5017',
-            months = 0,
-            fine = 0,
-            color = 'orange'
-        },
-        [18] = {
-            title = 'Resisting Arrest',
-            class = 'Misdemeanor',
-            id = 'P.C. 5018',
-            months = 5,
-            fine = 300,
-            color = 'orange'
-        }
-    },
-    [6] = {
-        [1] = {
-            title = 'Disobeying a Peace Officer',
-            class = 'infraction',
-            id = 'P.C. 6001',
-            months = 0,
-            fine = 750,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Disorderly Conduct',
-            class = 'Infraction',
-            id = 'P.C. 6002',
-            months = 0,
-            fine = 250,
-            color = 'green'
-        },
-        [3] = {
-            title = 'Disturbing the Peace',
-            class = 'infraction',
-            id = 'P.C. 6003',
-            months = 0,
-            fine = 350,
-            color = 'green'
-        },
-        [4] = {
-            title = 'False Reporting',
-            class = 'Misdemeanor',
-            id = 'P.C. 6004',
-            months = 10,
-            fine = 750,
-            color = 'green'
-        },
-        [5] = {
-            title = 'Harassment',
-            class = 'Misdemeanor',
-            id = 'P.C. 6005',
-            months = 10,
-            fine = 500,
-            color = 'orange'
-        },
-        [6] = {
-            title = 'Misdemeanor Obstruction of Justice',
-            class = 'Misdemeanor',
-            id = 'P.C. 6006',
-            months = 10,
-            fine = 500,
-            color = 'green'
-        },
-        [7] = {
-            title = 'Felony Obstruction of Justice',
-            class = 'Felony',
-            id = 'P.C. 6007',
-            months = 15,
-            fine = 900,
-            color = 'green'
-        },
-        [8] = {
-            title = 'Inciting a Riot',
-            class = 'Felony',
-            id = 'P.C. 6008',
-            months = 25,
-            fine = 1000,
-            color = 'orange'
-        },
-        [9] = {
-            title = 'Loitering on Government Properties',
-            class = 'Infraction',
-            id = 'P.C. 6009',
-            months = 0,
-            fine = 500,
-            color = 'green'
-        },
-        [10] = {
-            title = 'Tampering',
-            class = 'Misdemeanor',
-            id = 'P.C. 6010',
-            months = 10,
-            fine = 500,
-            color = 'green'
-        },
-        [11] = {
-            title = 'Vehicle Tampering',
-            class = 'Misdemeanor',
-            id = 'P.C. 6011',
-            months = 15,
-            fine = 750,
-            color = 'green'
-        },
-        [12] = {
-            title = 'Evidence Tampering',
-            class = 'Felony',
-            id = 'P.C. 6012',
-            months = 20,
-            fine = 1000,
-            color = 'green'
-        },
-        [13] = {
-            title = 'Witness Tampering',
-            class = 'Felony',
-            id = 'P.C. 6013',
-            months = 0,
-            fine = 0,
-            color = 'green'
-        },
-        [14] = {
-            title = 'Failure to Provide Identification',
-            class = 'Misdemeanor',
-            id = 'P.C. 6014',
-            months = 15,
-            fine = 1500,
-            color = 'green'
-        },
-        [15] = {
-            title = 'Vigilantism',
-            class = 'Felony',
-            id = 'P.C. 6015',
-            months = 30,
-            fine = 1500,
-            color = 'orange'
-        },
-        [16] = {
-            title = 'Unlawful Assembly',
-            class = 'Misdemeanor',
-            id = 'P.C. 6016',
-            months = 10,
-            fine = 750,
-            color = 'orange'
-        },
-        [17] = {
-            title = 'Government Corruption',
-            class = 'Felony',
-            id = 'P.C. 6017',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        },
-        [18] = {
-            title = 'Stalking',
-            class = 'Felony',
-            id = 'P.C. 6018',
-            months = 40,
-            fine = 1500,
-            color = 'orange'
-        },
-        [19] = {
-            title = 'Aiding and Abetting',
-            class = 'Misdemeanor',
-            id = 'P.C. 6019',
-            months = 15,
-            fine = 450,
-            color = 'orange'
-        },
-        [20] = {
-            title = 'Harboring a Fugitive',
-            class = 'Misdemeanor',
-            id = 'P.C. 6020',
-            months = 10,
-            fine = 1000,
-            color = 'green'
-        }
-    },
-    [7] = {
-        [1] = {
-            title = 'Misdemeanor Possession of Marijuana',
-            class = 'Mask',
-            id = 'P.C. 7001',
-            months = 5,
-            fine = 250,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Felony Possession of Marijuana',
-            class = 'Felony',
-            id = 'P.C. 7002',
-            months = 15,
-            fine = 1000,
-            color = 'green'
-        },
-        [3] = {
-            title = 'Cultivation of Marijuana A',
-            class = 'Misdemeanor',
-            id = 'P.C. 7003',
-            months = 10,
-            fine = 750,
-            color = 'green'
-        },
-        [4] = {
-            title = 'Cultivation of Marijuana B',
-            class = 'Felony',
-            id = 'P.C. 7004',
-            months = 30,
-            fine = 1500,
-            color = 'orange'
-        },
-        [5] = {
-            title = 'Possession of Marijuana with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7005',
-            months = 30,
-            fine = 3000,
-            color = 'orange'
-        },
-        [6] = {
-            title = 'Misdemeanor Possession of Cocaine',
-            class = 'Misdemeanor',
-            id = 'P.C. 7006',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [7] = {
-            title = 'Felony Possession of Cocaine',
-            class = 'Felony',
-            id = 'P.C. 7007',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [8] = {
-            title = 'Possession of Cocaine with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7008',
-            months = 35,
-            fine = 4500,
-            color = 'orange'
-        },
-        [9] = {
-            title = 'Misdemeanor Possession of Methamphetamine',
-            class = 'Misdemeanor',
-            id = 'P.C. 7009',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [10] = {
-            title = 'Felony Possession of Methamphetamine',
-            class = 'Felony',
-            id = 'P.C. 7010',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [11] = {
-            title = 'Possession of Methamphetamine with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7011',
-            months = 35,
-            fine = 4500,
-            color = 'orange'
-        },
-        [12] = {
-            title = 'Misdemeanor Possession of Oxy / Vicodin',
-            class = 'Felony',
-            id = 'P.C. 7012',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [13] = {
-            title = 'Felony Possession of Oxy / Vicodin',
-            class = 'Felony',
-            id = 'P.C. 7013',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [14] = {
-            title = 'Felony Possession of Oxy / Vicodin with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7014',
-            months = 35,
-            fine = 4500,
-            color = 'orange'
-        },
-        [15] = {
-            title = 'Misdemeanor Possession of Ecstasy',
-            class = 'Misdemeanor',
-            id = 'P.C. 7015',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [16] = {
-            title = 'Felony Possession of Ecstasy',
-            class = 'Felony',
-            id = 'P.C. 7016',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [17] = {
-            title = 'Possession of Ecstasy with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7017',
-            months = 35,
-            fine = 4500,
-            color = 'orange'
-        },
-        [18] = {
-            title = 'Misdemeanor Possession of Opium',
-            class = 'Misdemeanor',
-            id = 'P.C. 7018',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [19] = {
-            title = 'Felony Possession of Opium',
-            class = 'Felony',
-            id = 'P.C. 7019',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [20] = {
-            title = 'Possession of Opium with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7020',
-            months = 35,
-            fine = 4500,
-            color = 'orange'
-        },
-        [21] = {
-            title = 'Misdemeanor Possession of Adderall',
-            class = 'Misdemeanor',
-            id = 'P.C. 7021',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [22] = {
-            title = 'Felony Possession of Adderall',
-            class = 'Felony',
-            id = 'P.C. 7022',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [23] = {
-            title = 'Possession of Adderall with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7023',
-            months = 35,
-            fine = 4500,
-            color = 'orange'
-        },
-        [24] = {
-            title = 'Misdemeanor Possession of Xanax',
-            class = 'Misdemeanor',
-            id = 'P.C. 7024',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [25] = {
-            title = 'Felony Possession of Xanax',
-            class = 'Felony',
-            id = 'P.C. 7025',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [26] = {
-            title = 'Possession of Xanax with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7026',
-            months = 35,
-            fine = 4500,
-            color = 'orange'
-        },
-        [27] = {
-            title = 'Misdemeanor Possession of Shrooms',
-            class = 'Misdemeanor',
-            id = 'P.C. 7027',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [28] = {
-            title = 'Felony Possession of Shrooms',
-            class = 'Felony',
-            id = 'P.C. 7028',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [29] = {
-            title = 'Possession of Shrooms with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7029',
-            months = 35,
-            fine = 4500,
-            color = 'orange'
-        },
-        [30] = {
-            title = 'Misdemeanor Possession of Lean',
-            class = 'Misdemeanor',
-            id = 'P.C. 7030',
-            months = 7,
-            fine = 500,
-            color = 'green'
-        },
-        [31] = {
-            title = 'Felony Possession of Lean',
-            class = 'Felony',
-            id = 'P.C. 7031',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [32] = {
-            title = 'Possession of Lean with Intent to Distribute',
-            class = 'Felony',
-            id = 'P.C. 7032',
-            months = 35,
-            fine = 4500,
-            color = 'orange'
-        },
-        [33] = {
-            title = 'Sale of a controlled substance',
-            class = 'Misdemeanor',
-            id = 'P.C. 7033',
-            months = 10,
-            fine = 1000,
-            color = 'green'
-        },
-        [34] = {
-            title = 'Drug Trafficking',
-            class = 'Felony',
-            id = 'P.C. 7034',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        },
-        [35] = {
-            title = 'Desecration of a Human Corpse',
-            class = 'Felony',
-            id = 'P.C. 7035',
-            months = 20,
-            fine = 1500,
-            color = 'orange'
-        },
-        [36] = {
-            title = 'Public Intoxication',
-            class = 'Infraction',
-            id = 'P.C. 7036',
-            months = 0,
-            fine = 500,
-            color = 'green'
-        },
-        [37] = {
-            title = 'Public Indecency',
-            class = 'Misdemeanor',
-            id = 'P.C. 7037',
-            months = 10,
-            fine = 750,
-            color = 'green'
-        }
-    },
-    [8] = {
-        [1] = {
-            title = 'Criminal Possession of Weapon Class A',
-            class = 'Felony',
-            id = 'P.C. 8001',
-            months = 10,
-            fine = 500,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Criminal Possession of Weapon Class B',
-            class = 'Felony',
-            id = 'P.C. 8002',
-            months = 15,
-            fine = 1000,
-            color = 'green'
-        },
-        [3] = {
-            title = 'Criminal Possession of Weapon Class C',
-            class = 'Felony',
-            id = 'P.C. 8003',
-            months = 30,
-            fine = 3500,
-            color = 'green'
-        },
-        [4] = {
-            title = 'Criminal Possession of Weapon Class D',
-            class = 'Felony',
-            id = 'P.C. 8004',
-            months = 25,
-            fine = 1500,
-            color = 'green'
-        },
-        [5] = {
-            title = 'Criminal Sale of Weapon Class A',
-            class = 'Felony',
-            id = 'P.C. 8005',
-            months = 15,
-            fine = 1000,
-            color = 'orange'
-        },
-        [6] = {
-            title = 'Criminal Sale of Weapon Class B',
-            class = 'Felony',
-            id = 'P.C. 8006',
-            months = 20,
-            fine = 2000,
-            color = 'orange'
-        },
-        [7] = {
-            title = 'Criminal Sale of Weapon Class C',
-            class = 'Felony',
-            id = 'P.C. 8007',
-            months = 35,
-            fine = 7000,
-            color = 'orange'
-        },
-        [8] = {
-            title = 'Criminal Sale of Weapon Class D',
-            class = 'Felony',
-            id = 'P.C. 8008',
-            months = 30,
-            fine = 3000,
-            color = 'orange'
-        },
-        [9] = {
-            title = 'Criminal Use of Weapon',
-            class = 'Misdemeanor',
-            id = 'P.C. 8009',
-            months = 10,
-            fine = 450,
-            color = 'orange'
-        },
-        [10] = {
-            title = 'Possession of Illegal Firearm Modifications',
-            class = 'Misdemeanor',
-            id = 'P.C. 8010',
-            months = 10,
-            fine = 300,
-            color = 'green'
-        },
-        [11] = {
-            title = 'Weapon Trafficking',
-            class = 'Felony',
-            id = 'P.C. 8011',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        },
-        [12] = {
-            title = 'Brandishing a Weapon',
-            class = 'Misdemeanor',
-            id = 'P.C. 8012',
-            months = 15,
-            fine = 500,
-            color = 'orange'
-        },
-        [13] = {
-            title = 'Insurrection',
-            class = 'Felony',
-            id = 'P.C. 8013',
-            months = 0,
-            fine = 0,
-            color = 'red'
-        },
-        [14] = {
-            title = 'Flying into Restricted Airspace',
-            class = 'Felony',
-            id = 'P.C. 8014',
-            months = 20,
-            fine = 1500,
-            color = 'green'
-        },
-        [15] = {
-            title = 'Jaywalking',
-            class = 'Infraction',
-            id = 'P.C. 8015',
-            months = 0,
-            fine = 150,
-            color = 'green'
-        },
-        [16] = {
-            title = 'Criminal Use of Explosives',
-            class = 'Felony',
-            id = 'P.C. 8016',
-            months = 30,
-            fine = 2500,
-            color = 'orange'
-        }
-    },
-    [9] = {
-        [1] = {
-            title = 'Driving While Intoxicated',
-            class = 'Misdemeanor',
-            id = 'P.C. 9001',
-            months = 5,
-            fine = 300,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Evading',
-            class = 'Misdemeanor',
-            id = 'P.C. 9002',
-            months = 5,
-            fine = 400,
-            color = 'green'
-        },
-        [3] = {
-            title = 'Reckless Evading',
-            class = 'Felony',
-            id = 'P.C. 9003',
-            months = 10,
-            fine = 800,
-            color = 'orange'
-        },
-        [4] = {
-            title = 'Failure to Yield to Emergency Vehicle',
-            class = 'Infraction',
-            id = 'P.C. 9004',
-            months = 0,
-            fine = 600,
-            color = 'green'
-        },
-        [5] = {
-            title = 'Failure to Obey Traffic Control Device',
-            class = 'Infraction',
-            id = 'P.C. 9005',
-            months = 0,
-            fine = 150,
-            color = 'green'
-        },
-        [6] = {
-            title = 'Nonfunctional Vehicle',
-            class = 'Infraction',
-            id = 'P.C. 9006',
-            months = 0,
-            fine = 75,
-            color = 'green'
-        },
-        [7] = {
-            title = 'Negligent Driving',
-            class = 'Infraction',
-            id = 'P.C. 9007',
-            months = 0,
-            fine = 300,
-            color = 'green'
-        },
-        [8] = {
-            title = 'Reckless Driving',
-            class = 'Misdemeanor',
-            id = 'P.C. 9008',
-            months = 10,
-            fine = 750,
-            color = 'orange'
-        },
-        [9] = {
-            title = 'Third Degree Speeding',
-            class = 'Infraction',
-            id = 'P.C. 9009',
-            months = 0,
-            fine = 225,
-            color = 'green'
-        },
-        [10] = {
-            title = 'Second Degree Speeding',
-            class = 'Infraction',
-            id = 'P.C. 9010',
-            months = 0,
-            fine = 450,
-            color = 'green'
-        },
-        [11] = {
-            title = 'First Degree Speeding',
-            class = 'Infraction',
-            id = 'P.C. 9011',
-            months = 0,
-            fine = 750,
-            color = 'green'
-        },
-        [12] = {
-            title = 'Unlicensed Operation of Vehicle',
-            class = 'Infraction',
-            id = 'P.C. 9012',
-            months = 0,
-            fine = 500,
-            color = 'green'
-        },
-        [13] = {
-            title = 'Illegal U-Turn',
-            class = 'Infraction',
-            id = 'P.C. 9013',
-            months = 0,
-            fine = 75,
-            color = 'green'
-        },
-        [14] = {
-            title = 'Illegal Passing',
-            class = 'Infraction',
-            id = 'P.C. 9014',
-            months = 0,
-            fine = 300,
-            color = 'green'
-        },
-        [15] = {
-            title = 'Failure to Maintain Lane',
-            class = 'Infraction',
-            id = 'P.C. 9015',
-            months = 0,
-            fine = 300,
-            color = 'green'
-        },
-        [16] = {
-            title = 'Illegal Turn',
-            class = 'Infraction',
-            id = 'P.C. 9016',
-            months = 0,
-            fine = 150,
-            color = 'green'
-        },
-        [17] = {
-            title = 'Failure to Stop',
-            class = 'Infraction',
-            id = 'P.C. 9017',
-            months = 0,
-            fine = 600,
-            color = 'green'
-        },
-        [18] = {
-            title = 'Unauthorized Parking',
-            class = 'Infraction',
-            id = 'P.C. 9018',
-            months = 0,
-            fine = 300,
-            color = 'green'
-        },
-        [19] = {
-            title = 'Hit and Run',
-            class = 'Misdemeanor',
-            id = 'P.C. 9019',
-            months = 10,
-            fine = 500,
-            color = 'green'
-        },
-        [20] = {
-            title = 'Driving without Headlights or Signals',
-            class = 'Infraction',
-            id = 'P.C. 9020',
-            months = 0,
-            fine = 300,
-            color = 'green'
-        },
-        [21] = {
-            title = 'Street Racing',
-            class = 'Felony',
-            id = 'P.C. 9021',
-            months = 15,
-            fine = 1500,
-            color = 'green'
-        },
-        [22] = {
-            title = 'Piloting without Proper Licensing',
-            class = 'Felony',
-            id = 'P.C. 9022',
-            months = 20,
-            fine = 1500,
-            color = 'orange'
-        },
-        [23] = {
-            title = 'Unlawful Use of a Motorvehicle',
-            class = 'Misdemeanor',
-            id = 'P.C. 9023',
-            months = 10,
-            fine = 750,
-            color = 'green'
-        }
-    },
-    [10] = {
-        [1] = {
-            title = 'Hunting in Restricted Areas',
-            class = 'Infraction',
-            id = 'P.C. 10001',
-            months = 0,
-            fine = 450,
-            color = 'green'
-        },
-        [2] = {
-            title = 'Unlicensed Hunting',
-            class = 'Infraction',
-            id = 'P.C. 10002',
-            months = 0,
-            fine = 450,
-            color = 'green'
-        },
-        [3] = {
-            title = 'Animal Cruelty',
-            class = 'Misdemeanor',
-            id = 'P.C. 10003',
-            months = 10,
-            fine = 450,
-            color = 'green'
-        },
-        [4] = {
-            title = 'Hunting with a Non-Hunting Weapon',
-            class = 'Misdemeanor',
-            id = 'P.C. 10004',
-            months = 10,
-            fine = 750,
-            color = 'green'
-        },
-        [5] = {
-            title = 'Hunting outside of hunting hours',
-            class = 'Infraction',
-            id = 'P.C. 10005',
-            months = 0,
-            fine = 750,
-            color = 'green'
-        },
-        [6] = {
-            title = 'Overhunting',
-            class = 'Misdemeanor',
-            id = 'P.C. 10006',
-            months = 10,
-            fine = 1000,
-            color = 'green'
-        },
-        [7] = {
-            title = 'Poaching',
-            class = 'Felony',
-            id = 'P.C. 10007',
-            months = 20,
-            fine = 1250,
-            color = 'red'
-        }
-    }
-}
+RegisterServerEvent("rx_mdt:setCallsign")
+AddEventHandler("rx_mdt:setCallsign", function(identifier, callsign)
+    local src = source
+    local xPlayer = ESX.GetPlayerFromId(src)
+    if not policeJobs[xPlayer.job.name] then
+        exports['esx_holdup']:BanPlayer(source, 'Cheating, trigger event! (rx_mdt:setCallsign)')
+        return
+    end
+    lib.logger(xPlayer.identifier, 'mdt', ('Hráč: **%s/%s %s** \nnastavil volací znak: **%s**'):format(GetPlayerName(src), xPlayer.getName(), GetCallsign(xPlayer.identifier), callsign))
+    MysqlConverter(Config.Mysql, 'execute', "UPDATE users SET `callsign` = @callsign WHERE identifier = @identifier", {
+        ['@callsign'] = callsign,
+        ['@identifier'] = identifier
+    })
+end)
 
-local function IsCidFelon(sentCid, cb)
-    if sentCid then
-        exports.oxmysql:execute('SELECT charges FROM pd_convictions WHERE cid = @cid', {
-            ["@cid"] = sentCid
-        }, function(convictions)
-            local Charges = {}
-            for i = 1, #convictions do
-                local currCharges = json.decode(convictions[i]['charges'])
-                for x = 1, #currCharges do
-                    table.insert(Charges, currCharges[x])
-                end
+function tprint(t, s)
+    for k, v in pairs(t) do
+        local kfmt = '["' .. tostring(k) .. '"]'
+        if type(k) ~= 'string' then
+            kfmt = '[' .. k .. ']'
+        end
+        local vfmt = '"' .. tostring(v) .. '"'
+        if type(v) == 'table' then
+            tprint(v, (s or '') .. kfmt)
+        else
+            if type(v) ~= 'string' then
+                vfmt = tostring(v)
             end
-            for i = 1, #Charges do
-                for p = 1, #PenalCode do
-                    for x = 1, #PenalCode[p] do
-                        if PenalCode[p][x]['title'] == Charges[i] then
-                            if PenalCode[p][x]['class'] == 'Felony' then
-                                cb(true)
-                                return
-                            end
-                            break
-                        end
-                    end
-                end
+            print(type(t) .. (s or '') .. kfmt .. ' = ' .. vfmt)
+        end
+    end
+end
+
+function getUserFromCid(cid)
+    local users = ESX.GetPlayerFromId(source)
+    for k, v in pairs(users) do
+        local user = ESX.GetPlayerFromId(v)
+        if user then
+            local char = user.getJob().grade_salary
+            if char.id == cid then
+                return user
             end
-            cb(false)
+        end
+    end
+    return false
+end
+
+function MysqlConverter(plugin, type, query, var)
+    local wait = promise.new()
+    if type == 'fetchAll' and plugin == 'mysql-async' then
+        MySQL.Async.fetchAll(query, var, function(result)
+            wait:resolve(result)
         end)
     end
+    if type == 'execute' and plugin == 'mysql-async' then
+        MySQL.Async.execute(query, var, function(result)
+            wait:resolve(result)
+        end)
+    end
+    if type == 'execute' and plugin == 'ghmattisql' then
+        exports['ghmattimysql']:execute(query, var, function(result)
+            wait:resolve(result)
+        end)
+    end
+    if type == 'fetchAll' and plugin == 'ghmattisql' then
+        exports.ghmattimysql:execute(query, var, function(result)
+            wait:resolve(result)
+        end)
+    end
+    if type == 'execute' and plugin == 'oxmysql' then
+        exports.oxmysql:execute(query, var, function(result)
+            wait:resolve(result)
+        end)
+    end
+    if type == 'fetchAll' and plugin == 'oxmysql' then
+        exports['oxmysql']:fetch(query, var, function(result)
+            wait:resolve(result)
+        end)
+    end
+    return Citizen.Await(wait)
 end
 
-exports('IsCidFelon', IsCidFelon) -- exports['erp_mdt']:IsCidFelon()
-
-RegisterCommand("isfelon", function(source, args, rawCommand)
-    IsCidFelon(1998, function(res)
-        print(res)
-    end)
-end, false)
-
-RegisterNetEvent('erp_mdt:getPenalCode')
-AddEventHandler('erp_mdt:getPenalCode', function()
-    TriggerClientEvent('erp_mdt:getPenalCode', source, PenalCodeTitles, PenalCode)
-end)
-
-local policeJobs = {
-    ['lspd'] = true,
-    ['bcso'] = true,
-    ['sast'] = true,
-    ['sasp'] = true,
-    ['doc'] = true,
-    ['sapr'] = true,
-    ['pa'] = true
-}
-
-RegisterNetEvent('erp_mdt:toggleDuty')
-AddEventHandler('erp_mdt:toggleDuty', function(cid, status)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    local player = ESX.GetPlayerFromIdentifier(cid)
-    if player then
-        if player.job.name == "ambulance" and player.job.duty == 0 then
-            local mzDist = #(GetEntityCoords(GetPlayerPed(source)) - vector3(-475.15, -314.0, 62.15))
-            if mzDist > 100 then
-                TriggerClientEvent('erp_notifications:client:SendAlert', source, {
-                    type = 'error',
-                    text = 'You must be at Mount Zonah to clock in!!',
-                    length = 5000
-                })
-                TriggerClientEvent('erp_mdt:exitMDT', source)
-                return
-            end
-        end
-        if player.job.name == 'police' or player.job.name == 'ambulance' or player.job.name == 'doj' then
-            local isPolice = false
-            if policeJobs[player.job.name] then
-                isPolice = true
-            end
-            -- ESX.SetPlayerData(player.source, 'job', {
-                -- name = player.job.name,
-                -- grade = player.job.grade,
-                -- duty = status,
-                -- isPolice = isPolice
-            -- })
-            exports.oxmysql:executeSync("UPDATE users SET duty = @duty WHERE identifier = @cid", {
-                ["@duty"] = status,
-                ["@cid"] = cid
-            })
-            if status == 0 then
-                TriggerEvent('erp_mdt:AddLog',
-                    xPlayer.name .. " set " .. player.name .. '\'s duty to 10-7')
-            else
-                TriggerEvent('erp_mdt:AddLog',
-                    xPlayer.name .. " set " .. player.name .. '\'s duty to 10-8')
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:setCallsign')
-AddEventHandler('erp_mdt:setCallsign', function(cid, newcallsign)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    local player = ESX.GetPlayerFromIdentifier(cid)
-    if player then
-        if player.job.name == 'police' or player.job.name == 'ambulance' or player.job.name == 'doj' then
-            SetResourceKvp(cid .. '-callsign', newcallsign)
-            TriggerClientEvent('erp_mdt:updateCallsign', player.source, newcallsign)
-            TriggerEvent('erp_mdt:AddLog',
-                xPlayer.name .. " set " .. player['name'] .. '\'s callsign to ' .. newcallsign)
-        end
-    end
-end)
-
-local function fuckme(cid, incident, data, cb)
-    cb(exports.oxmysql:executeSync('SELECT * FROM pd_convictions WHERE cid = @cid AND linkedincident = @linkedincident', {
-        ["@cid"] = cid,
-        ["@linkedincident"] = id
-    }), data)
+function firstToUpper(str)
+    return (str:gsub("^%l", string.upper))
 end
-
-RegisterNetEvent('erp_mdt:saveIncident')
-AddEventHandler('erp_mdt:saveIncident',
-    function(id, title, information, tags, officers, civilians, evidence, associated, time)
-        local player = ESX.GetPlayerFromId(source)
-        if player then
-            if (player.job.name == 'police' or player.job.name == 'doj') then
-                if id == 0 then
-                    exports.oxmysql:insert(
-                        'INSERT INTO `pd_incidents` (`author`, `title`, `details`, `tags`, `officersinvolved`, `civsinvolved`, `evidence`, `time`) VALUES (@author, @title, @details, @tags, @officersinvolved, @civsinvolved, @evidence, @time)',
-                        {
-                            ["@author"] = player.name,
-                            ["@title"] = title,
-                            ["@details"] = information,
-                            ["@tags"] = json.encode(tags),
-                            ["@officersinvolved"] = json.encode(officers),
-                            ["@civsinvolved"] = json.encode(civilians),
-                            ["@evidence"] = json.encode(evidence),
-                            ["@time"] = time
-                        }, function(infoResult)
-                            if infoResult then
-                                for i = 1, #associated do
-                                    exports.oxmysql:executeSync(
-                                        'INSERT INTO `pd_convictions` (`cid`, `linkedincident`, `warrant`, `guilty`, `processed`, `associated`, `charges`, `fine`, `sentence`, `recfine`, `recsentence`, `time`) VALUES (@cid, @linkedincident, @warrant, @guilty, @processed, @associated, @charges, @fine, @sentence, @recfine, @recsentence, @time)',
-                                        {
-                                            ["@cid"] = associated[i]['Cid'],
-                                            ["@linkedincident"] = infoResult,
-                                            ["@warrant"] = associated[i]['Warrant'],
-                                            ["@guilty"] = associated[i]['Guilty'],
-                                            ["@processed"] = associated[i]['Processed'],
-                                            ["@associated"] = associated[i]['Isassociated'],
-                                            ["@charges"] = json.encode(associated[i]['Charges']),
-                                            ["@fine"] = tonumber(associated[i]['Fine']),
-                                            ["@sentence"] = tonumber(associated[i]['Sentence']),
-                                            ["@recfine"] = tonumber(associated[i]['recfine']),
-                                            ["@recsentence"] = tonumber(associated[i]['recsentence']),
-                                            ["@time"] = time
-                                        })
-                                end
-                                TriggerClientEvent('erp_mdt:updateIncidentDbId', player.source, infoResult)
-                                -- TriggerEvent('erp_mdt:AddLog', "A vehicle with the plate ("..plate..") was added to the vehicle information database by "..player['name'])
-                            end
-                        end)
-                elseif id > 0 then
-                    exports.oxmysql:executeSync(
-                        "UPDATE pd_incidents SET title = @title, details = @details, civsinvolved = @civsinvolved, tags = @tags, officersinvolved = @officersinvolved, evidence = @evidence WHERE id = @id",
-                        {
-                            ["@title"] = title,
-                            ["@details"] = information,
-                            ["@tags"] = json.encode(tags),
-                            ["@officersinvolved"] = json.encode(officers),
-                            ["@civsinvolved"] = json.encode(civilians),
-                            ["@evidence"] = json.encode(evidence),
-                            ["@id"] = id
-                        })
-                    for i = 1, #associated do
-                        TriggerEvent('erp_mdt:handleExistingConvictions', associated[i], id, time)
-                    end
-                end
-            end
-        end
-    end)
-
-AddEventHandler('erp_mdt:handleExistingConvictions', function(data, incidentid, time)
-    exports.oxmysql:execute('SELECT * FROM pd_convictions WHERE cid = @cid AND linkedincident = @linkedincident', {
-        ["@cid"] = data['Cid'],
-        ["@linkedincident"] = incidentid
-    }, function(convictionRes)
-        if convictionRes and convictionRes[1] and convictionRes[1]['id'] then
-            exports.oxmysql:executeSync(
-                'UPDATE pd_convictions SET cid = @cid, linkedincident = @linkedincident, warrant = @warrant, guilty = @guilty, processed = @processed, associated = @associated, charges = @charges, fine = @fine, sentence = @sentence, recfine = @recfine, recsentence = @recsentence WHERE cid = @cid AND linkedincident = @linkedincident',
-                {
-                   ["@cid"] = data['Cid'],
-                    ["@linkedincident"] = incidentid,
-                    ["@warrant"] = data['Warrant'],
-                    ["@guilty"] = data['Guilty'],
-                    ["@processed"] = data['Processed'],
-                    ["@associated"] = data['Isassociated'],
-                    ["@charges"] = json.encode(data['Charges']),
-                    ["@fine"] = tonumber(data['Fine']),
-                    ["@sentence"] = tonumber(data['Sentence']),
-                    ["@recfine"] = tonumber(data['recfine']),
-                    ["@recsentence"] = tonumber(data['recsentence'])
-                })
-        else
-            exports.oxmysql:executeSync(
-                'INSERT INTO `pd_convictions` (`cid`, `linkedincident`, `warrant`, `guilty`, `processed`, `associated`, `charges`, `fine`, `sentence`, `recfine`, `recsentence`, `time`) VALUES (@cid, @linkedincident, @warrant, @guilty, @processed, @associated, @charges, @fine, @sentence, @recfine, @recsentence, @time)',
-                {
-                    ["@cid"] = tonumber(data['Cid']),
-                    ["@linkedincident"] = incidentid,
-                    ["@warrant"] = data['Warrant'],
-                    ["@guilty"] = data['Guilty'],
-                    ["@processed"] = data['Processed'],
-                    ["@associated"] = data['Isassociated'],
-                    ["@charges"] = json.encode(data['Charges']),
-                    ["@fine"] = tonumber(data['Fine']),
-                    ["@sentence"] = tonumber(data['Sentence']),
-                    ["@recfine"] = tonumber(data['recfine']),
-                    ["@recsentence"] = tonumber(data['recsentence']),
-                    ["@time"] = time
-                })
-        end
-    end)
-end)
-
-RegisterNetEvent('erp_mdt:removeIncidentCriminal')
-AddEventHandler('erp_mdt:removeIncidentCriminal', function(cid, incident)
-    exports.oxmysql:executeSync('DELETE FROM pd_convictions WHERE cid = @cid AND linkedincident = @linkedincident', {
-        ["@cid"] = cid,
-        ["@linkedincident"] = incident
-    })
-end)
-
--- Dispatch
-
-RegisterNetEvent('erp_mdt:setWaypoint')
-AddEventHandler('erp_mdt:setWaypoint', function(callid)
-    local player = ESX.GetPlayerFromId(source)
-    if player then
-        if player.job.name == 'police' or player.job.name == 'ambulance' then
-            if callid then
-                local calls = exports['erp_dispatch']:GetDispatchCalls()
-                TriggerClientEvent('erp_mdt:setWaypoint', player.source, calls[callid])
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:callDetach')
-AddEventHandler('erp_mdt:callDetach', function(callid)
-    local player = ESX.GetPlayerFromId(source)
-    if player then
-        if player.job.name == 'police' or player.job.name == 'ambulance' then
-            if callid then
-                TriggerEvent('dispatch:removeUnit', callid, player, function(newNum)
-                    TriggerClientEvent('erp_mdt:callDetach', -1, callid, newNum)
-                end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:callAttach')
-AddEventHandler('erp_mdt:callAttach', function(callid)
-    local player = ESX.GetPlayerFromId(source)
-    if player then
-        if player.job.name == 'police' or player.job.name == 'ambulance' then
-            if callid then
-                TriggerEvent('dispatch:addUnit', callid, player, function(newNum)
-                    TriggerClientEvent('erp_mdt:callAttach', -1, callid, newNum)
-                end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:attachedUnits')
-AddEventHandler('erp_mdt:attachedUnits', function(callid)
-    local player = ESX.GetPlayerFromId(source)
-    if player then
-        if player.job.name == 'police' or player.job.name == 'ambulance' then
-            if callid then
-                local calls = exports['erp_dispatch']:GetDispatchCalls()
-                TriggerClientEvent('erp_mdt:attachedUnits', player.source, calls[callid]['units'], callid)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:callDispatchDetach')
-AddEventHandler('erp_mdt:callDispatchDetach', function(callid, cid)
-    local player = ESX.GetPlayerFromIdentifier(cid)
-    local callid = tonumber(callid)
-    if player then
-        if player.job.name == 'police' or player.job.name == 'ambulance' then
-            if callid then
-                TriggerEvent('dispatch:removeUnit', callid, player, function(newNum)
-                    TriggerClientEvent('erp_mdt:callDetach', -1, callid, newNum)
-                end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:setDispatchWaypoint')
-AddEventHandler('erp_mdt:setDispatchWaypoint', function(callid, cid)
-    local player = ESX.GetPlayerFromIdentifier(cid)
-    local callid = tonumber(callid)
-    if player then
-        if player.job.name == 'police' or player.job.name == 'ambulance' then
-            if callid then
-                local calls = exports['erp_dispatch']:GetDispatchCalls()
-                TriggerClientEvent('erp_mdt:setWaypoint', player.source, calls[callid])
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:callDragAttach')
-AddEventHandler('erp_mdt:callDragAttach', function(callid, cid)
-    local player = ESX.GetPlayerFromIdentifier(cid)
-    local callid = tonumber(callid)
-    if player then
-        if player.job.name == 'police' or player.job.name == 'ambulance' then
-            if callid then
-                TriggerEvent('dispatch:addUnit', callid, player, function(newNum)
-                    TriggerClientEvent('erp_mdt:callAttach', -1, callid, newNum)
-                end)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:setWaypoint:unit')
-AddEventHandler('erp_mdt:setWaypoint:unit', function(cid)
-    local source = source
-    local me = ESX.GetPlayerFromId(source)
-    local player = ESX.GetPlayerFromIdentifier(cid)
-    if player then
-        TriggerClientEvent('erp_notifications:client:SendAlert', player.source, {
-            type = 'inform',
-            text = me['name'] .. ' set a waypoint on you!',
-            length = 5000
-        })
-        TriggerClientEvent('erp_mdt:setWaypoint:unit', source, GetEntityCoords(GetPlayerPed(player.source)))
-    end
-end)
-
--- Dispatch chat
-
-local dispatchmessages = {}
-
---[[
-	profilepic
-	name
-	message
-	time
-]]
-
-local function PpPpPpic(sex, profilepic)
-    if profilepic then
-        return profilepic
-    end
-    if sex == "f" then
-        return "img/female.png"
-    end
-    return "img/male.png"
-end
-
-RegisterNetEvent('erp_mdt:sendMessage')
-AddEventHandler('erp_mdt:sendMessage', function(message, time)
-    if message and time then
-        local player = ESX.GetPlayerFromId(source)
-        if player then
-            exports.oxmysql:execute("SELECT id, identifier, profilepic, sex FROM `users` WHERE identifier = @id LIMIT 1", {
-                ["@id"] = player['identifier'] -- % wildcard, needed to search for all alike results
-            }, function(data)
-                if data and data[1] then
-                    local ProfilePicture = PpPpPpic(data[1]['sex'], data[1]['profilepic'])
-                    local callsign = GetCallsign(player['identifier'])
-                    local Item = {
-                        profilepic = ProfilePicture,
-                        callsign = callsign[1].callsign,
-                        cid = player['identifier'],
-                        name = '(' .. callsign[1].callsign .. ') ' .. player['name'],
-                        message = message,
-                        time = time,
-                        job = player['job']['name']
-                    }
-                    table.insert(dispatchmessages, Item)
-                    TriggerClientEvent('erp_mdt:dashboardMessage', -1, Item)
-                    -- Send to all clients, for auto updating stuff, ya dig.
-                end
-            end)
-        end
-    end
-end)
-
-AddEventHandler('erp_mdt:open', function(source)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and
-            (xPlayer.job.name == 'police' or (xPlayer.job.name == 'ambulance' or xPlayer.job.name == 'doj')) then
-            TriggerClientEvent('erp_mdt:dashboardMessages', xPlayer['source'], dispatchmessages)
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:refreshDispatchMsgs')
-AddEventHandler('erp_mdt:refreshDispatchMsgs', function()
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and
-            (xPlayer.job.name == 'police' or (xPlayer.job.name == 'ambulance' or xPlayer.job.name == 'doj')) then
-            TriggerClientEvent('erp_mdt:dashboardMessages', xPlayer['source'], dispatchmessages)
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:getCallResponses')
-AddEventHandler('erp_mdt:getCallResponses', function(callid)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'ambulance')) then
-            local calls = exports['erp_dispatch']:GetDispatchCalls()
-            TriggerClientEvent('erp_mdt:getCallResponses', xPlayer.source, calls[callid]['responses'], callid)
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:sendCallResponse')
-AddEventHandler('erp_mdt:sendCallResponse', function(message, time, callid)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job and (xPlayer.job.name == 'police' or (xPlayer.job.name == 'ambulance')) then
-            TriggerEvent('dispatch:sendCallResponse', xPlayer, callid, message, time, function(isGood)
-                if isGood then
-                    TriggerClientEvent('erp_mdt:sendCallResponse', -1, message, time, callid, xPlayer.name)
-                end
-            end)
-        end
-    end
-end)
-
-CreateThread(function()
-    Wait(1800000)
-    dispatchmessages = {}
-end)
-
-RegisterNetEvent('erp_mdt:setRadio')
-AddEventHandler('erp_mdt:setRadio', function(cid, newcallsign)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        if xPlayer.job.name == 'police' or xPlayer.job.name == 'ambulance' or xPlayer.job.name == 'doj' then
-            local tgtPlayer = ESX.GetPlayerFromIdentifier(cid)
-            if tgtPlayer then
-                TriggerClientEvent('erp_mdt:setRadio', tgtPlayer['source'], newcallsign, xPlayer.name)
-                TriggerClientEvent('erp_notifications:client:SendAlert', xPlayer['source'], {
-                    type = 'success',
-                    text = 'Radio updated.',
-                    length = 5000
-                })
-            end
-        end
-    end
-end)
-
-local Impound = {}
-
-function isRequestVehicle(vehId)
-    local found = false
-    for i = 1, #Impound do
-        if Impound[i]['vehicle'] == vehId then
-            found = true
-            Impound[i] = nil
-            break
-        end
-    end
-    return found
-end
-exports('isRequestVehicle', isRequestVehicle) -- exports['erp_mdt']:isRequestVehicle()
-
-RegisterNetEvent('erp_mdt:impoundVehicle')
-AddEventHandler('erp_mdt:impoundVehicle', function(sentInfo, sentVehicle)
-    local player = ESX.GetPlayerFromId(source)
-    if player then
-        if player.job.name == 'police' then
-            if sentInfo and type(sentInfo) == 'table' then
-                local plate, linkedreport, fee, time = sentInfo['plate'], sentInfo['linkedreport'], sentInfo['fee'],
-                    sentInfo['time']
-                if (plate and linkedreport and fee and time) then
-                    exports.oxmysql:execute("SELECT id, plate FROM `owned_vehicles` WHERE plate=:plate LIMIT 1", {
-                        plate = string.gsub(plate, "^%s*(.-)%s*$", "%1")
-                    }, function(vehicle)
-                        if vehicle and vehicle[1] then
-                            local data = vehicle[1]
-                            exports.oxmysql:insert(
-                                'INSERT INTO `impound` (`vehicleid`, `linkedreport`, `fee`, `time`) VALUES (:vehicleid, :linkedreport, :fee, :time)',
-                                {
-                                    vehicleid = data['id'],
-                                    linkedreport = linkedreport,
-                                    fee = fee,
-                                    time = os.time() + (time * 60)
-                                }, function(res)
-                                    -- notify?
-                                    local data = {
-                                        vehicleid = data['id'],
-                                        plate = plate,
-                                        beingcollected = 0,
-                                        vehicle = sentVehicle,
-                                        officer = player['name'],
-                                        number = player['phone_number'],
-                                        time = os.time() * 1000,
-                                        src = player['source']
-                                    }
-                                    local vehicle = NetworkGetEntityFromNetworkId(sentVehicle)
-                                    FreezeEntityPosition(vehicle, true)
-                                    table.insert(Impound, data)
-                                    TriggerClientEvent('erp_mdt:notifyMechanics', -1, data)
-                                end)
-                        end
-                    end)
-                end
-            end
-        end
-    end
-end)
-
--- erp_mdt:getImpoundVehicles
-
-RegisterNetEvent('erp_mdt:getImpoundVehicles')
-AddEventHandler('erp_mdt:getImpoundVehicles', function()
-    TriggerClientEvent('erp_mdt:getImpoundVehicles', source, Impound)
-end)
-
-RegisterNetEvent('erp_mdt:collectVehicle')
-AddEventHandler('erp_mdt:collectVehicle', function(sentId)
-    local player = ESX.GetPlayerFromId(source)
-    if player then
-        local source = source
-        for i = 1, #Impound do
-            local id = Impound[i]['vehicleid']
-            if tostring(id) == tostring(sentId) then
-                local vehicle = NetworkGetEntityFromNetworkId(Impound[i]['vehicle'])
-                if not DoesEntityExist(vehicle) then
-                    TriggerClientEvent('erp_phone:sendNotification', source, {
-                        img = 'vehiclenotif.png',
-                        title = "Impound",
-                        content = "This vehicle has already been impounded.",
-                        time = 5000
-                    })
-                    Impound[i] = nil
-                    return
-                end
-                local collector = Impound[i]['beingcollected']
-                if collector ~= 0 and GetPlayerPing(collector) >= 0 then
-                    TriggerClientEvent('erp_phone:sendNotification', source, {
-                        img = 'vehiclenotif.png',
-                        title = "Impound",
-                        content = "This vehicle is being collected.",
-                        time = 5000
-                    })
-                    return
-                end
-                Impound[i]['beingcollected'] = source
-                TriggerClientEvent('erp_mdt:collectVehicle', source, GetEntityCoords(vehicle))
-                TriggerClientEvent('erp_phone:sendNotification', Impound[i]['src'], {
-                    img = 'vehiclenotif.png',
-                    title = "Impound",
-                    content = player['name'] .. " is collecing the vehicle with plate " .. Impound[i]['plate'] ..
-                        "!",
-                    time = 5000
-                })
-                break
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:removeImpound')
-AddEventHandler('erp_mdt:removeImpound', function(plate)
-    local player = ESX.GetPlayerFromId(source)
-    if player then
-        if player.job.name == 'police' then
-            exports.oxmysql:execute("SELECT id, plate FROM `owned_vehicles` WHERE plate=:plate LIMIT 1", {
-                plate = string.gsub(plate, "^%s*(.-)%s*$", "%1")
-            }, function(vehicle)
-                if vehicle and vehicle[1] then
-                    local data = vehicle[1]
-                    exports.oxmysql:executeSync("DELETE FROM `impound` WHERE vehicleid=:vehicleid", {
-                        vehicleid = data['id']
-                    })
-                end
-            end)
-        end
-    end
-end)
-
-RegisterNetEvent('erp_mdt:statusImpound')
-AddEventHandler('erp_mdt:statusImpound', function(plate)
-    local player = ESX.GetPlayerFromId(source)
-    if player then
-        if player.job.name == 'police' then
-            exports.oxmysql:execute("SELECT id, plate FROM `owned_vehicles` WHERE plate=:plate LIMIT 1", {
-                plate = string.gsub(plate, "^%s*(.-)%s*$", "%1")
-            }, function(vehicle)
-                if vehicle and vehicle[1] then
-                    local data = vehicle[1]
-                    exports.oxmysql:execute("SELECT * FROM `impound` WHERE vehicleid=:vehicleid LIMIT 1", {
-                        vehicleid = data['id']
-                    }, function(impoundinfo)
-                        if impoundinfo and impoundinfo[1] then
-                            TriggerClientEvent('erp_mdt:statusImpound', player['source'], impoundinfo[1], plate)
-                        end
-                    end)
-                end
-            end)
-        end
-    end
-end)
-

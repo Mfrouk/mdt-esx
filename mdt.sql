@@ -1,268 +1,138 @@
-CREATE TABLE IF NOT EXISTS `emsmdtdata` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `cid` int(11) DEFAULT NULL,
-  `information` longtext DEFAULT NULL,
-  `tags` longtext DEFAULT NULL,
-  `gallery` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET NAMES utf8 */;
+/*!50503 SET NAMES utf8mb4 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
-CREATE TABLE IF NOT EXISTS `ems_bulletin` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `title` text NOT NULL,
-  `desc` mediumtext NOT NULL,
-  `author` text NOT NULL,
-  `time` longtext NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=LATIN1;
-
-CREATE TABLE IF NOT EXISTS `ems_icu` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `author` varchar(50) DEFAULT NULL,
-  `title` varchar(50) DEFAULT NULL,
-  `plate` varchar(50) DEFAULT NULL,
-  `owner` varchar(60) DEFAULT NULL,
-  `individual` varchar(50) DEFAULT NULL,
-  `detail` longtext DEFAULT NULL,
-  `tags` longtext DEFAULT NULL,
-  `gallery` longtext DEFAULT NULL,
-  `officersinvolved` longtext DEFAULT NULL,
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `ems_reports` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `author` varchar(50) DEFAULT NULL,
-  `title` varchar(50) DEFAULT NULL,
+CREATE TABLE IF NOT EXISTS `vehicle_mdt` (
+  `dbid` int(11) NOT NULL AUTO_INCREMENT,
+  `license_plate` varchar(50) NOT NULL DEFAULT '',
+  `stolen` longtext NOT NULL,
+  `notes` varchar(255) DEFAULT '{}',
+  `image` longtext NOT NULL,
+  `code5` longtext NOT NULL,
   `type` varchar(50) DEFAULT NULL,
-  `detail` longtext DEFAULT NULL,
-  `tags` longtext DEFAULT NULL,
-  `officersinvolved` longtext DEFAULT NULL,
-  `civsinvolved` longtext DEFAULT NULL,
-  `gallery` longtext DEFAULT NULL,
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+  `info` longtext NOT NULL,
+  PRIMARY KEY (`dbid`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `pd_bolos` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `author` varchar(50) DEFAULT NULL,
-  `title` varchar(50) DEFAULT NULL,
-  `plate` varchar(50) DEFAULT NULL,
-  `owner` varchar(50) DEFAULT NULL,
-  `individual` varchar(50) DEFAULT NULL,
-  `detail` longtext DEFAULT NULL,
-  `tags` longtext DEFAULT NULL,
-  `gallery` longtext DEFAULT NULL,
-  `officersinvolved` longtext DEFAULT NULL,
-  `time` longtext DEFAULT NULL,
+CREATE TABLE IF NOT EXISTS `mdw_bulletin` (
+  `id` bigint(20) NOT NULL DEFAULT 0,
+  `title` longtext NOT NULL,
+  `info` longtext NOT NULL,
+  `time` varchar(50) NOT NULL DEFAULT '0',
+  `src` mediumtext NOT NULL,
+  `author` mediumtext NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `pd_bulletin` (
+CREATE TABLE IF NOT EXISTS `mdw_incidents` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `title` tinytext DEFAULT NULL,
-  `desc` mediumtext DEFAULT NULL,
-  `author` tinytext DEFAULT NULL,
-  `time` varchar(50) DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `pd_convictions` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `cid` int(11) DEFAULT NULL,
-  `linkedincident` int(11) NOT NULL DEFAULT 0,
-  `warrant` varchar(50) DEFAULT NULL,
-  `guilty` varchar(50) DEFAULT NULL,
-  `processed` varchar(50) DEFAULT NULL,
-  `associated` varchar(50) DEFAULT '0',
-  `charges` longtext DEFAULT NULL,
-  `fine` int(11) DEFAULT 0,
-  `sentence` int(11) DEFAULT 0,
-  `recfine` int(11) DEFAULT 0,
-  `recsentence` int(11) DEFAULT 0,
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=42 DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `pd_incidents` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `author` varchar(50) NOT NULL DEFAULT '',
-  `title` varchar(50) NOT NULL DEFAULT '0',
-  `details` longtext CHARACTER SET utf8mb4 NOT NULL,
+  `title` varchar(100) NOT NULL,
+  `author` varchar(100) NOT NULL,
+  `time` varchar(100) NOT NULL,
+  `details` longtext NOT NULL,
   `tags` longtext NOT NULL,
-  `officersinvolved` longtext NOT NULL,
-  `civsinvolved` longtext NOT NULL,
+  `officers` longtext NOT NULL,
+  `civilians` longtext NOT NULL,
   `evidence` longtext NOT NULL,
-  `time` longtext DEFAULT NULL,
+  `associated` longtext NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `pd_logs` (
+CREATE TABLE IF NOT EXISTS `mdw_logs` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `text` longtext NOT NULL DEFAULT '',
-  `time` longtext DEFAULT NULL,
+  `text` longtext NOT NULL,
+  `time` mediumtext NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `pd_reports` (
+/*!40000 ALTER TABLE `mdw_logs` DISABLE KEYS */;
+INSERT INTO `mdw_logs` (`id`, `text`, `time`) VALUES
+	(25, 'Carson Miller Revoked licenses type: Drive Edited Citizen Id: 24', '1635572269852'),
+	(26, 'Carson Miller Revoked licenses type: Drive Edited Citizen Id: 24', '1635572271934'),
+	(27, 'Carson Miller Revoked licenses type: Pilot Edited Citizen Id: 24', '1635572282645'),
+	(28, 'Carson Miller Given licenses type: Pilot Edited Citizen Id: 24', '1635572286808');
+/*!40000 ALTER TABLE `mdw_logs` ENABLE KEYS */;
+
+CREATE TABLE IF NOT EXISTS `mdw_messages` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `author` varchar(50) DEFAULT NULL,
-  `title` text DEFAULT NULL,
-  `type` varchar(50) DEFAULT NULL,
+  `job` varchar(255) NOT NULL DEFAULT 'police',
+  `name` varchar(255) DEFAULT NULL,
+  `message` varchar(255) DEFAULT NULL,
+  `time` varchar(255) DEFAULT NULL,
+  `profilepic` mediumtext DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+/*!40000 ALTER TABLE `mdw_messages` DISABLE KEYS */;
+INSERT INTO `mdw_messages` (`id`, `job`, `name`, `message`, `time`, `profilepic`) VALUES
+	(10, 'police', 'Carson Miller', 'Hey', '1634857901842', 'https://i.imgur.com/VlCWQdn.png'),
+	(11, 'police', 'Carson Miller', 'Hi', '1634860966373', 'https://i.imgur.com/VlCWQdn.png'),
+	(12, 'police', 'Carson Miller', 'Poggers', '1634860970375', 'https://i.imgur.com/VlCWQdn.png');
+/*!40000 ALTER TABLE `mdw_messages` ENABLE KEYS */;
+
+CREATE TABLE IF NOT EXISTS `mdw_profiles` (
+  `idP` int(11) NOT NULL AUTO_INCREMENT,
+  `cid` varchar(60) NOT NULL,
+  `image` longtext DEFAULT NULL,
+  `description` varchar(50) DEFAULT NULL,
+  `name` varchar(50) DEFAULT NULL,
+  `tags` varchar(255) NOT NULL DEFAULT '{}',
+  `gallery` varchar(255) NOT NULL DEFAULT '{}',
+  PRIMARY KEY (`idP`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mdw_bolos` (
+  `dbid` int(11) NOT NULL AUTO_INCREMENT,
+  `title` mediumtext DEFAULT NULL,
+  `author` mediumtext DEFAULT NULL,
+  `time` mediumtext DEFAULT NULL,
+  `license_plate` mediumtext DEFAULT NULL,
+  `owner` mediumtext DEFAULT NULL,
+  `individual` varchar(60) NOT NULL DEFAULT '',
   `detail` longtext DEFAULT NULL,
   `tags` longtext DEFAULT NULL,
-  `officersinvolved` longtext DEFAULT NULL,
-  `civsinvolved` longtext DEFAULT NULL,
-  `gallery` longtext DEFAULT NULL,
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+  `gallery` longtext DEFAULT NULL CHECK (json_valid(`gallery`)),
+  `officers` longtext DEFAULT NULL,
+  PRIMARY KEY (`dbid`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `pd_vehicleinfo` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `plate` varchar(50) DEFAULT NULL,
-  `information` longtext NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `policemdtdata` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `cid` int(11) DEFAULT NULL,
-  `information` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `tags` longtext DEFAULT '[]',
-  `gallery` longtext DEFAULT '[]',
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `emsmdtdata` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `cid` int(11) DEFAULT NULL,
-  `information` longtext DEFAULT NULL,
-  `tags` longtext DEFAULT NULL,
-  `gallery` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `ems_bulletin` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `title` text NOT NULL,
-  `desc` mediumtext NOT NULL,
-  `author` text NOT NULL,
-  `time` longtext NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `ems_reports` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `author` varchar(50) DEFAULT NULL,
-  `title` varchar(50) DEFAULT NULL,
-  `type` varchar(50) DEFAULT NULL,
+CREATE TABLE IF NOT EXISTS `mdw_reports` (
+  `dbid` int(11) NOT NULL AUTO_INCREMENT,
+  `title` mediumtext DEFAULT NULL,
+  `type` mediumtext DEFAULT NULL,
+  `author` mediumtext DEFAULT NULL,
+  `time` mediumtext DEFAULT NULL,
   `detail` longtext DEFAULT NULL,
-  `tags` longtext DEFAULT NULL,
-  `officersinvolved` longtext DEFAULT NULL,
-  `civsinvolved` longtext DEFAULT NULL,
-  `gallery` longtext DEFAULT NULL,
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+  `tags` varchar(255) DEFAULT '[]',
+  `gallery` varchar(255) DEFAULT '[]',
+  `officers` varchar(255) DEFAULT '[]',
+  `civsinvolved` varchar(255) DEFAULT '[]',
+  PRIMARY KEY (`dbid`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `pd_bolos` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `author` varchar(50) DEFAULT NULL,
-  `title` varchar(50) DEFAULT NULL,
-  `plate` varchar(50) DEFAULT NULL,
-  `owner` varchar(50) DEFAULT NULL,
-  `individual` varchar(50) DEFAULT NULL,
-  `detail` longtext DEFAULT NULL,
-  `tags` longtext DEFAULT NULL,
-  `gallery` longtext DEFAULT NULL,
-  `officersinvolved` longtext DEFAULT NULL,
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+ALTER TABLE `users` ADD COLUMN `callsign` VARCHAR(50) NULL DEFAULT '0';
 
-CREATE TABLE IF NOT EXISTS `pd_bulletin` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `title` tinytext DEFAULT NULL,
-  `desc` mediumtext DEFAULT NULL,
-  `author` tinytext DEFAULT NULL,
-  `time` varchar(50) DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+ALTER TABLE `user_licenses` ADD COLUMN `status` INT(11) NULL DEFAULT 1;
 
-CREATE TABLE IF NOT EXISTS `pd_convictions` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `cid` int(11) DEFAULT NULL,
-  `linkedincident` int(11) NOT NULL DEFAULT 0,
-  `warrant` varchar(50) DEFAULT NULL,
-  `guilty` varchar(50) DEFAULT NULL,
-  `processed` varchar(50) DEFAULT NULL,
-  `associated` varchar(50) DEFAULT '0',
-  `charges` longtext DEFAULT NULL,
-  `fine` int(11) DEFAULT 0,
-  `sentence` int(11) DEFAULT 0,
-  `recfine` int(11) DEFAULT 0,
-  `recsentence` int(11) DEFAULT 0,
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=42 DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `pd_incidents` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `author` varchar(50) NOT NULL DEFAULT '',
-  `title` varchar(50) NOT NULL DEFAULT '0',
-  `details` longtext CHARACTER SET utf8mb4 NOT NULL,
-  `tags` longtext NOT NULL,
-  `officersinvolved` longtext NOT NULL,
-  `civsinvolved` longtext NOT NULL,
-  `evidence` longtext NOT NULL,
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `pd_logs` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `text` longtext NOT NULL DEFAULT '',
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `pd_reports` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `author` varchar(50) DEFAULT NULL,
-  `title` text DEFAULT NULL,
-  `type` varchar(50) DEFAULT NULL,
-  `detail` longtext DEFAULT NULL,
-  `tags` longtext DEFAULT NULL,
-  `officersinvolved` longtext DEFAULT NULL,
-  `civsinvolved` longtext DEFAULT NULL,
-  `gallery` longtext DEFAULT NULL,
-  `time` longtext DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `pd_vehicleinfo` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `plate` varchar(50) DEFAULT NULL,
-  `information` longtext NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-CREATE TABLE IF NOT EXISTS `policemdtdata` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `cid` int(11) DEFAULT NULL,
-  `information` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `tags` longtext DEFAULT '[]',
-  `gallery` longtext DEFAULT '[]',
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-ALTER TABLE `owned_vehicles` ADD COLUMN `image` LONGTEXT NULL DEFAULT NULL AFTER `garage_id`;
-
-ALTER TABLE `users` ADD COLUMN `callsign` LONGTEXT NULL DEFAULT NULL;
-
-ALTER TABLE `users` ADD COLUMN `profilepic` varchar(500) DEFAULT NULL;
-
-ALTER TABLE `users` ADD COLUMN `duty` int(11) DEFAULT 0;
+INSERT INTO `licenses` (`type`, `label`) VALUES
+	('atpla', 'ATPL [A] - Dopravní letadlo'),
+	('atplh', 'ATPL [H] - Dopravní vrtulník'),
+	('dmv', 'ŘP Teorie'),
+	('drive', 'ŘP - B'),
+	('drive_bike', 'ŘP - A'),
+	('drive_truck', 'ŘP - C'),
+	('hunting', 'Lovecký průkaz'),
+	('ppla', 'PPL [A] - Soukromé letadlo'),
+	('pplh', 'PPL [H] - Soukromy vrtulnik'),
+	('sluzebni_prukaz', 'Služební průkaz'),
+	('weapon', 'Zbrojní Průkaz'),
+	('weaponda', 'ZP - Lovecký'),
+	('weaponka', 'ZP - Velké')
+;
+/*!40101 SET SQL_MODE=IFNULL(@OLD_SQL_MODE, '') */;
+/*!40014 SET FOREIGN_KEY_CHECKS=IFNULL(@OLD_FOREIGN_KEY_CHECKS, 1) */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40111 SET SQL_NOTES=IFNULL(@OLD_SQL_NOTES, 1) */;
